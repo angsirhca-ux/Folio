@@ -1,0 +1,376 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-border: var(--border);
+  --color-shadow: var(--shadow);
+  --color-sidebar: var(--sidebar);
+  --font-serif: var(--font-adobe-garamond), "Adobe Garamond Pro", "Adobe Garamond", Georgia, serif;
+  --font-display: var(--font-adobe-garamond), "Adobe Garamond Pro", "Adobe Garamond", Georgia, serif;
+  --font-body: var(--font-adobe-garamond), "Adobe Garamond Pro", "Adobe Garamond", Georgia, serif;
+  --font-ui: var(--font-crimson), "Crimson Pro", "Adobe Garamond Pro", Georgia, serif;
+}
+
+:root {
+  --paper: #f7f3ea;
+  --ink: #2d2a26;
+  --ink-muted: #6b645c;
+  --ink-faint: #a39b90;
+  --accent: #b08d57;
+  --accent-soft: rgba(176, 141, 87, 0.12);
+  --border: rgba(45, 42, 38, 0.08);
+  --shadow: rgba(45, 42, 38, 0.06);
+  --sidebar: #f1ebe0;
+  --selection: rgba(176, 141, 87, 0.22);
+  --cursor: #b08d57;
+  --font-size: 20px;
+  --line-height: 1.7;
+  --page-width: 52rem;
+  --ease-apple: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  transition:
+    background-color 0.55s var(--ease-apple),
+    color 0.55s var(--ease-apple);
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  transition:
+    background-color 0.55s var(--ease-apple),
+    color 0.55s var(--ease-apple);
+  overflow: hidden;
+}
+
+::selection {
+  background: var(--selection);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* ——— Loading ——— */
+@keyframes folio-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+.folio-loading-bar {
+  animation: folio-slide 1.2s var(--ease-apple) infinite;
+}
+
+/* ——— Manuscript typography ——— */
+.manuscript-editor {
+  font-family: var(--font-body);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  color: var(--ink);
+  caret-color: var(--cursor);
+  outline: none;
+  min-height: 60vh;
+}
+
+.manuscript-editor .ProseMirror {
+  outline: none;
+  min-height: 60vh;
+}
+
+.manuscript-editor.scene-write-editor,
+.manuscript-editor.scene-write-editor .ProseMirror {
+  min-height: 14rem;
+}
+
+.manuscript-editor .ProseMirror > * + * {
+  margin-top: 1.1em;
+}
+
+.manuscript-editor h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  /* em keeps every chapter title identical and tied to --font-size */
+  font-size: 1.85em;
+  line-height: 1.25;
+  letter-spacing: 0.06em;
+  text-align: center;
+  margin: 0 0 1.75em;
+  color: var(--ink);
+  /* Match sidebar casing — show the real title, not CSS-forced capitals */
+  text-transform: none;
+  font-variant-caps: normal;
+  font-feature-settings: normal;
+}
+
+.manuscript-editor h1 * {
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  font-variant-caps: inherit;
+  text-transform: inherit;
+}
+
+.manuscript-editor h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.55em;
+  line-height: 1.3;
+  margin: 1.75em 0 0.7em;
+  color: var(--ink);
+}
+
+.manuscript-editor h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 1.25em;
+  margin: 1.5em 0 0.55em;
+}
+
+.manuscript-editor p {
+  margin: 0;
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+/* Novel rhythm: indent, no blank line between body paragraphs */
+.manuscript-editor .ProseMirror > p + p {
+  text-indent: 1.5em;
+  margin-top: 0;
+}
+
+.manuscript-editor p:first-of-type,
+.manuscript-editor h1 + p,
+.manuscript-editor h2 + p,
+.manuscript-editor h3 + p,
+.manuscript-editor hr + p,
+.manuscript-editor .scene-break + p {
+  text-indent: 0;
+}
+
+/* Optional elegant drop cap on first paragraph after chapter title */
+.manuscript-editor h1 + p::first-letter {
+  font-family: var(--font-display);
+  float: left;
+  font-size: 3.6em;
+  line-height: 0.78;
+  padding: 0.08em 0.1em 0 0;
+  color: var(--accent);
+  font-weight: 400;
+}
+
+.manuscript-editor em,
+.manuscript-editor i {
+  font-style: italic;
+}
+
+.manuscript-editor strong,
+.manuscript-editor b {
+  font-weight: 600;
+}
+
+.manuscript-editor blockquote {
+  margin: 1.6em 0;
+  padding: 0 0 0 1.25em;
+  border-left: 1px solid var(--accent);
+  color: var(--ink-muted);
+  font-style: italic;
+}
+
+.manuscript-editor hr,
+.manuscript-editor p:has(> br:only-child) {
+  border: none;
+}
+
+/* Scene break: centered ornaments when paragraph is only * * * */
+.manuscript-editor p {
+  position: relative;
+}
+
+.ProseMirror p.is-empty::before,
+.ProseMirror .is-empty::before {
+  color: var(--ink-faint);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  font-style: italic;
+}
+
+/* Mobile write surface */
+.mobile-write .manuscript-editor .ProseMirror {
+  min-height: 50dvh;
+  padding-bottom: 2rem;
+}
+
+.mobile-write .ProseMirror p.is-empty:first-child::before,
+.mobile-write .ProseMirror .is-empty:first-child::before {
+  content: "Begin writing…";
+}
+
+/* Focus mode — dim inactive nodes */
+.manuscript-editor.focus-mode .ProseMirror > *:not(.has-focus) {
+  opacity: 0.28;
+  filter: blur(0.15px);
+  transition:
+    opacity 0.45s var(--ease-apple),
+    filter 0.45s var(--ease-apple);
+}
+
+.manuscript-editor.focus-mode .ProseMirror > *.has-focus {
+  opacity: 1;
+  filter: none;
+  transition: opacity 0.35s var(--ease-apple);
+}
+
+.manuscript-editor p {
+  letter-spacing: 0.01em;
+}
+
+/* Centered scene breaks when a paragraph is only ornaments */
+.manuscript-editor p:has(> br:only-child) {
+  text-align: center;
+  text-indent: 0;
+}
+
+.scene-break {
+  text-align: center !important;
+  text-indent: 0 !important;
+  letter-spacing: 0.45em;
+  color: var(--ink-muted);
+  margin: 1.6em 0 !important;
+  font-family: var(--font-display);
+  user-select: none;
+  cursor: default;
+}
+
+.scene-break.ProseMirror-selectednode {
+  outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 6px;
+  border-radius: 2px;
+}
+
+/* Developmental editor — light muted yellow (only while the AI panel is open) */
+.manuscript-editor .review-highlight {
+  background: rgba(232, 214, 140, 0.28);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: background 0.25s var(--ease-apple);
+}
+
+.manuscript-editor .review-highlight-active {
+  background: rgba(232, 214, 140, 0.48);
+  box-shadow: inset 0 -1px 0 rgba(196, 168, 72, 0.35);
+}
+
+/* Toolbar */
+.folio-toolbar {
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+}
+
+/* Scrollbars — nearly invisible */
+.folio-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-faint) transparent;
+}
+
+.folio-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.folio-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.folio-scroll::-webkit-scrollbar-thumb {
+  background: var(--ink-faint);
+  border-radius: 999px;
+  opacity: 0.4;
+}
+
+/* Hide native UI chrome feel */
+button {
+  font-family: var(--font-ui);
+}
+
+input,
+textarea {
+  font-family: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+/* Fullscreen writing */
+.folio-fullscreen .folio-chrome {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s var(--ease-apple);
+}
+
+.folio-fullscreen:hover .folio-chrome,
+.folio-fullscreen:focus-within .folio-chrome {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ——— Outline ——— */
+.outline-canvas {
+  min-height: 100%;
+  background: #ede8e0;
+  color: var(--ink);
+}
+
+
+.storyboard-zoom::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid #f7f3ea;
+  box-shadow: 0 1px 4px rgba(45, 42, 38, 0.2);
+  cursor: pointer;
+}
+
+.storyboard-zoom::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid #f7f3ea;
+  box-shadow: 0 1px 4px rgba(45, 42, 38, 0.2);
+  cursor: pointer;
+}
+
