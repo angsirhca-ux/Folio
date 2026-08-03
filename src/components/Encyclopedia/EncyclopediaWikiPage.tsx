@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -21,13 +21,17 @@ import {
   encyclopediaDepth,
   sortEncyclopediaStacks,
 } from "@/lib/encyclopedia";
+import { prepareCoverImage } from "@/lib/coverImage";
 import { useEncyclopediaDeepen } from "@/hooks/useClaudeEnrichment";
 import { povColor, type EncyclopediaEntry } from "@/lib/types";
+import { ContinuityNotesSection } from "@/components/Bible/ContinuityNotesSection";
+import { MembershipChecklist } from "@/components/Bible/MembershipChecklist";
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
   { id: "findings", label: "Findings" },
   { id: "connections", label: "Links" },
+  { id: "continuity", label: "As-of" },
   { id: "appearances", label: "On the page" },
 ] as const;
 
@@ -44,11 +48,17 @@ export function EncyclopediaWikiPage({ entryId }: { entryId: string }) {
     removeEncyclopediaLink,
     addEncyclopediaStack,
     ensureEncyclopediaStack,
+    promoteEncyclopediaToSeriesBible,
+    setEncyclopediaMemberCharacters,
+    setEncyclopediaMemberLocations,
     focusScene,
   } = useBook();
   const [pendingDelete, setPendingDelete] = useState(false);
   const [linkLabel, setLinkLabel] = useState("");
   const [linkTarget, setLinkTarget] = useState("");
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
 
   const entry = useMemo(
     () => (book.encyclopedia ?? []).find((e) => e.id === entryId),
@@ -230,6 +240,18 @@ export function EncyclopediaWikiPage({ entryId }: { entryId: string }) {
                     busy={deepenBusy}
                     onClick={() => void deepen()}
                   />
+                  {book.seriesId ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full text-xs"
+                      onClick={() =>
+                        promoteEncyclopediaToSeriesBible(entry.id)
+                      }
+                    >
+                      Promote to series
+                    </Button>
+                  ) : null}
                   {deepenDoneAt ? (
                     <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
                       Updated
@@ -324,6 +346,85 @@ export function EncyclopediaWikiPage({ entryId }: { entryId: string }) {
               placeholder="opening, echo, unanswered…"
               multiline={false}
             />
+
+            <div className="mt-8">
+              <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+                Cover image
+              </p>
+              <p className="mt-1 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+                Optional art for the shelf card — stored locally with the book.
+              </p>
+              {entry.coverImage ? (
+                <div className="mt-3 overflow-hidden rounded-2xl border border-[rgba(45,42,38,0.08)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={entry.coverImage}
+                    alt={entry.coverName || "Cover"}
+                    className="max-h-48 w-full object-cover"
+                  />
+                </div>
+              ) : null}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  ref={coverInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!file) return;
+                    setCoverBusy(true);
+                    setCoverError(null);
+                    void prepareCoverImage(file)
+                      .then((prepared) => {
+                        patch({
+                          coverImage: prepared.dataUrl,
+                          coverName: prepared.name,
+                        });
+                      })
+                      .catch((err) => {
+                        setCoverError(
+                          err instanceof Error
+                            ? err.message
+                            : "Could not use that image.",
+                        );
+                      })
+                      .finally(() => setCoverBusy(false));
+                  }}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-full text-xs"
+                  disabled={coverBusy}
+                  onClick={() => coverInputRef.current?.click()}
+                >
+                  {coverBusy
+                    ? "Preparing…"
+                    : entry.coverImage
+                      ? "Replace cover"
+                      : "Add cover"}
+                </Button>
+                {entry.coverImage ? (
+                  <button
+                    type="button"
+                    className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)] hover:text-[#6B3A2A]"
+                    onClick={() =>
+                      patch({ coverImage: undefined, coverName: undefined })
+                    }
+                  >
+                    Remove
+                  </button>
+                ) : null}
+              </div>
+              {coverError ? (
+                <p className="mt-2 font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
+                  {coverError}
+                </p>
+              ) : null}
+            </div>
           </motion.header>
 
           <WikiSection id="findings" title="Findings" index={1}>
@@ -338,9 +439,42 @@ export function EncyclopediaWikiPage({ entryId }: { entryId: string }) {
           </WikiSection>
 
           <WikiSection id="connections" title="Links" index={2}>
+            <MembershipChecklist
+              label="Members"
+              hint="Cast tied to this card — faction, species, institution, and so on."
+              items={(book.characters ?? []).map((c) => ({
+                id: c.id,
+                label: c.name,
+                href: `/characters/${c.id}`,
+              }))}
+              selected={entry.memberIds ?? []}
+              onChange={(ids) =>
+                setEncyclopediaMemberCharacters(entryId, ids)
+              }
+              emptyHint="Add characters first, then mark membership here."
+            />
+
+            <div className="mt-10">
+              <MembershipChecklist
+                label="Places"
+                hint="Locations that belong to this card — territory, HQ, sacred site."
+                items={(book.locations ?? []).map((l) => ({
+                  id: l.id,
+                  label: l.name,
+                  href: `/locations/${l.id}`,
+                }))}
+                selected={entry.memberLocationIds ?? []}
+                onChange={(ids) =>
+                  setEncyclopediaMemberLocations(entryId, ids)
+                }
+                emptyHint="Add places first, then mark membership here."
+              />
+            </div>
+
             <WikiField
+              className="mt-10"
               label="Linked characters"
-              hint="Names from the cast this thread touches."
+              hint="Freeform names from the cast this thread touches."
               value={entry.linkedCharacters.join(", ")}
               onChange={(raw) =>
                 patch({
@@ -401,7 +535,7 @@ export function EncyclopediaWikiPage({ entryId }: { entryId: string }) {
                           />
                           {linked ? (
                             <Link
-                              href={`/research/${linked.id}`}
+                              href={`/encyclopedia/${linked.id}`}
                               className="font-[family-name:var(--font-display)] text-lg text-[var(--ink)] underline decoration-[rgba(176,141,87,0.3)] underline-offset-4"
                             >
                               {linked.title}
@@ -497,6 +631,13 @@ export function EncyclopediaWikiPage({ entryId }: { entryId: string }) {
                 </Button>
               </form>
             </div>
+          </WikiSection>
+
+          <WikiSection id="continuity" title="As-of notes" index={3}>
+            <ContinuityNotesSection
+              notes={entry.continuityNotes ?? []}
+              onChange={(continuityNotes) => patch({ continuityNotes })}
+            />
           </WikiSection>
 
           <WikiSection id="appearances" title="On the page" index={4}>

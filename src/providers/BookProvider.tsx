@@ -130,11 +130,17 @@ import {
   createEncyclopediaEntry,
   createEncyclopediaLink,
   createEncyclopediaStack,
+  applyEncyclopediaStackStarter,
   ensureEncyclopediaStackNamed,
   findEncyclopediaByTitle,
   sortEncyclopediaStacks,
   syncEncyclopediaFromManuscript,
 } from "@/lib/encyclopedia";
+import {
+  createChronicleEvent,
+  nextChronicleOrder,
+  sortChronicleEvents,
+} from "@/lib/chronicle";
 import {
   emptyBookTrash,
   purgeTrashItem,
@@ -158,14 +164,23 @@ import {
 } from "@/lib/goals";
 import {
   cloneSeriesCharacterIntoBook,
+  cloneSeriesEncyclopediaIntoBook,
   cloneSeriesLocationIntoBook,
   createSeries as createSeriesRecord,
   findSeries,
   promoteCharacterToSeries,
+  promoteEncyclopediaToSeries,
   promoteLocationToSeries,
 } from "@/lib/series";
+import {
+  setCharacterBelongsTo,
+  setEncyclopediaCharacterMembers,
+  setEncyclopediaLocationMembers,
+  setLocationBelongsTo,
+} from "@/lib/membership";
 import type {
   BookGoals,
+  ChronicleEvent,
   Scene,
   SceneStatus,
   Series,
@@ -209,15 +224,26 @@ interface BookContextValue {
   updateSeries: (
     seriesId: string,
     partial: Partial<
-      Pick<Series, "title" | "synopsis" | "notes" | "characters" | "locations">
+      Pick<
+        Series,
+        | "title"
+        | "synopsis"
+        | "notes"
+        | "characters"
+        | "locations"
+        | "encyclopedia"
+        | "encyclopediaStacks"
+      >
     >,
   ) => void;
   deleteSeries: (seriesId: string) => void;
   assignBookToSeries: (bookId: string, seriesId: string | null) => void;
   bringSeriesCharacterIntoBook: (characterId: string) => string | null;
   bringSeriesLocationIntoBook: (locationId: string) => string | null;
+  bringSeriesEncyclopediaIntoBook: (entryId: string) => string | null;
   promoteCharacterToSeriesBible: (characterId: string) => void;
   promoteLocationToSeriesBible: (locationId: string) => void;
+  promoteEncyclopediaToSeriesBible: (entryId: string) => void;
   updateGoals: (partial: Partial<BookGoals>) => void;
   /** Words written since this browser session opened the book. */
   sessionWords: number;
@@ -287,6 +313,23 @@ interface BookContextValue {
   removeCharacterRelationship: (
     characterId: string,
     relationshipId: string,
+  ) => void;
+  /** Sync character ↔ encyclopedia membership both ways. */
+  setCharacterBelongsToEntries: (
+    characterId: string,
+    entryIds: string[],
+  ) => void;
+  setEncyclopediaMemberCharacters: (
+    entryId: string,
+    characterIds: string[],
+  ) => void;
+  setLocationBelongsToEntries: (
+    locationId: string,
+    entryIds: string[],
+  ) => void;
+  setEncyclopediaMemberLocations: (
+    entryId: string,
+    locationIds: string[],
   ) => void;
   addFamilyTree: (name?: string) => string;
   updateFamilyTree: (
@@ -399,6 +442,7 @@ interface BookContextValue {
   ) => void;
   deleteEncyclopediaStack: (stackId: string) => void;
   ensureEncyclopediaStack: (name: string) => string;
+  applyEncyclopediaStarter: (starterId: string) => void;
   addEncyclopediaLink: (
     entryId: string,
     partial: {
@@ -419,6 +463,15 @@ interface BookContextValue {
     }>,
   ) => void;
   removeEncyclopediaLink: (entryId: string, linkId: string) => void;
+  addChronicleEvent: (
+    partial?: Partial<ChronicleEvent> & { title?: string },
+  ) => string;
+  updateChronicleEvent: (
+    eventId: string,
+    partial: Partial<Omit<ChronicleEvent, "id" | "createdAt">>,
+  ) => void;
+  deleteChronicleEvent: (eventId: string) => void;
+  moveChronicleEvent: (eventId: string, direction: "up" | "down") => void;
   /** Apply a developmental-editor pass (flags + memory). Never rewrites prose. */
   applyDevelopmentalReview: (
     pass: DevelopmentalPass,
@@ -1280,6 +1333,22 @@ export function BookProvider({ children }: { children: ReactNode }) {
         });
         return createdId;
       },
+      bringSeriesEncyclopediaIntoBook: (entryId) => {
+        const series = findSeries(librarySeries, book.seriesId);
+        const entry = series?.encyclopedia?.find((e) => e.id === entryId);
+        if (!series || !entry) return null;
+        let createdId: string | null = null;
+        updateBook((b) => {
+          const result = cloneSeriesEncyclopediaIntoBook(
+            b,
+            entry,
+            series.encyclopediaStacks ?? [],
+          );
+          createdId = result.entry.id;
+          return result.book;
+        });
+        return createdId;
+      },
       promoteCharacterToSeriesBible: (characterId) => {
         const series = findSeries(librarySeries, book.seriesId);
         const character = book.characters.find((c) => c.id === characterId);
@@ -1293,6 +1362,18 @@ export function BookProvider({ children }: { children: ReactNode }) {
         const location = book.locations.find((l) => l.id === locationId);
         if (!series || !location) return;
         const next = promoteLocationToSeries(series, location);
+        const lib = upsertSeriesInLibrary(next);
+        setLibrarySeries(lib.series ?? []);
+      },
+      promoteEncyclopediaToSeriesBible: (entryId) => {
+        const series = findSeries(librarySeries, book.seriesId);
+        const entry = (book.encyclopedia ?? []).find((e) => e.id === entryId);
+        if (!series || !entry) return;
+        const next = promoteEncyclopediaToSeries(
+          series,
+          entry,
+          book.encyclopediaStacks ?? [],
+        );
         const lib = upsertSeriesInLibrary(next);
         setLibrarySeries(lib.series ?? []);
       },
@@ -1673,6 +1754,18 @@ export function BookProvider({ children }: { children: ReactNode }) {
             };
           }),
         })),
+      setCharacterBelongsToEntries: (characterId, entryIds) =>
+        updateBook((b) => setCharacterBelongsTo(b, characterId, entryIds)),
+      setEncyclopediaMemberCharacters: (entryId, characterIds) =>
+        updateBook((b) =>
+          setEncyclopediaCharacterMembers(b, entryId, characterIds),
+        ),
+      setLocationBelongsToEntries: (locationId, entryIds) =>
+        updateBook((b) => setLocationBelongsTo(b, locationId, entryIds)),
+      setEncyclopediaMemberLocations: (entryId, locationIds) =>
+        updateBook((b) =>
+          setEncyclopediaLocationMembers(b, entryId, locationIds),
+        ),
       addFamilyTree: (name) => {
         let id = "";
         updateBook((b) => {
@@ -2250,6 +2343,20 @@ export function BookProvider({ children }: { children: ReactNode }) {
         });
         return id;
       },
+      applyEncyclopediaStarter: (starterId) => {
+        updateBook((b) => {
+          const stacks = applyEncyclopediaStackStarter(
+            b.encyclopediaStacks ?? [],
+            starterId,
+          );
+          if (stacks === (b.encyclopediaStacks ?? [])) return b;
+          return {
+            ...b,
+            encyclopediaStacks: stacks,
+            updatedAt: Date.now(),
+          };
+        });
+      },
       addEncyclopediaLink: (entryId, partial) =>
         updateBook((b) => ({
           ...b,
@@ -2296,6 +2403,68 @@ export function BookProvider({ children }: { children: ReactNode }) {
             };
           }),
         })),
+      addChronicleEvent: (partial) => {
+        let createdId = "";
+        updateBook((b) => {
+          const events = b.chronicle ?? [];
+          const event = createChronicleEvent({
+            ...partial,
+            title: partial?.title?.trim() || "New event",
+            order: partial?.order ?? nextChronicleOrder(events),
+          });
+          createdId = event.id;
+          return {
+            ...b,
+            chronicle: sortChronicleEvents([...events, event]),
+            updatedAt: Date.now(),
+          };
+        });
+        return createdId;
+      },
+      updateChronicleEvent: (eventId, partial) =>
+        updateBook((b) => ({
+          ...b,
+          chronicle: sortChronicleEvents(
+            (b.chronicle ?? []).map((e) =>
+              e.id === eventId
+                ? {
+                    ...e,
+                    ...partial,
+                    id: e.id,
+                    createdAt: e.createdAt,
+                    updatedAt: Date.now(),
+                  }
+                : e,
+            ),
+          ),
+          updatedAt: Date.now(),
+        })),
+      deleteChronicleEvent: (eventId) =>
+        updateBook((b) => ({
+          ...b,
+          chronicle: (b.chronicle ?? []).filter((e) => e.id !== eventId),
+          updatedAt: Date.now(),
+        })),
+      moveChronicleEvent: (eventId, direction) =>
+        updateBook((b) => {
+          const sorted = sortChronicleEvents(b.chronicle ?? []);
+          const index = sorted.findIndex((e) => e.id === eventId);
+          if (index < 0) return b;
+          const swapWith = direction === "up" ? index - 1 : index + 1;
+          if (swapWith < 0 || swapWith >= sorted.length) return b;
+          const a = sorted[index];
+          const c = sorted[swapWith];
+          const next = sorted.map((e) => {
+            if (e.id === a.id) return { ...e, order: c.order, updatedAt: Date.now() };
+            if (e.id === c.id) return { ...e, order: a.order, updatedAt: Date.now() };
+            return e;
+          });
+          return {
+            ...b,
+            chronicle: sortChronicleEvents(next),
+            updatedAt: Date.now(),
+          };
+        }),
       applyDevelopmentalReview: (pass, memoryUpdates) =>
         updateBook((b) => ({
           ...b,

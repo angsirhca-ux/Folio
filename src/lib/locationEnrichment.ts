@@ -223,6 +223,11 @@ export function locationSnapshotForPrompt(location: Location): string {
       story: location.story,
       secrets: location.secrets,
       inhabitants: location.inhabitants,
+      belongsToIds: location.belongsToIds ?? [],
+      continuityNotes: (location.continuityNotes ?? []).map((n) => ({
+        asOf: n.asOf,
+        note: n.note,
+      })),
       tags: location.tags.filter((t) => t !== "from-story"),
       connections: location.connections.map((r) => ({
         toName: r.toName,

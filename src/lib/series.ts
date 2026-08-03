@@ -1,6 +1,8 @@
 import type {
   Book,
   Character,
+  EncyclopediaEntry,
+  EncyclopediaStack,
   FolioLibrary,
   Location,
   Series,
@@ -8,6 +10,14 @@ import type {
 import { createId } from "./utils";
 import { createCharacter, findCharacterByName } from "./characters";
 import { createLocation, findLocationByName } from "./locations";
+import {
+  createEncyclopediaEntry,
+  createEncyclopediaStack,
+  ensureEncyclopediaStackNamed,
+  findEncyclopediaByTitle,
+  findStackByName,
+  sortEncyclopediaStacks,
+} from "./encyclopedia";
 
 export function createSeries(
   partial?: Partial<Series> & { title?: string },
@@ -20,6 +30,8 @@ export function createSeries(
     notes: partial?.notes ?? "",
     characters: partial?.characters ?? [],
     locations: partial?.locations ?? [],
+    encyclopedia: partial?.encyclopedia ?? [],
+    encyclopediaStacks: partial?.encyclopediaStacks ?? [],
     createdAt: partial?.createdAt ?? now,
     updatedAt: partial?.updatedAt ?? now,
   };
@@ -27,6 +39,32 @@ export function createSeries(
 
 export function hydrateSeries(raw: Partial<Series> | null | undefined): Series {
   const base = createSeries(raw ?? undefined);
+  let stacks: EncyclopediaStack[] = [];
+  for (const [i, s] of [...(raw?.encyclopediaStacks ?? [])].entries()) {
+    stacks.push(
+      createEncyclopediaStack(
+        {
+          ...s,
+          name: s?.name || "Untitled stack",
+          order: s?.order ?? i,
+        },
+        stacks,
+      ),
+    );
+  }
+  const encyclopedia = (raw?.encyclopedia ?? []).map((e) => {
+    let stackId = e?.stackId ?? "";
+    if (!stackId || !stacks.some((s) => s.id === stackId)) {
+      const ensured = ensureEncyclopediaStackNamed(stacks, "General");
+      stacks = ensured.stacks;
+      stackId = ensured.stack.id;
+    }
+    return createEncyclopediaEntry({
+      ...e,
+      title: e?.title?.trim() || "Untitled",
+      stackId,
+    });
+  });
   return {
     ...base,
     characters: (raw?.characters ?? []).map((c) =>
@@ -41,6 +79,8 @@ export function hydrateSeries(raw: Partial<Series> | null | undefined): Series {
         name: l?.name?.trim() || "Unnamed",
       }),
     ),
+    encyclopediaStacks: sortEncyclopediaStacks(stacks),
+    encyclopedia,
   };
 }
 
@@ -221,5 +261,135 @@ export function seriesLocationsMissingFromBook(
   if (!series) return [];
   return series.locations.filter(
     (l) => !findLocationByName(book.locations ?? [], l.name),
+  );
+}
+
+/**
+ * Clone a series encyclopedia article into the book.
+ * Matches stacks by name; creates the stack on the book if needed.
+ */
+export function cloneSeriesEncyclopediaIntoBook(
+  book: Book,
+  entry: EncyclopediaEntry,
+  seriesStacks: EncyclopediaStack[],
+): { book: Book; entry: EncyclopediaEntry; alreadyHad: boolean } {
+  const existing = findEncyclopediaByTitle(book.encyclopedia ?? [], entry.title);
+  if (existing) {
+    return { book, entry: existing, alreadyHad: true };
+  }
+
+  let stacks = [...(book.encyclopediaStacks ?? [])];
+  const seriesStack = seriesStacks.find((s) => s.id === entry.stackId);
+  const stackName = seriesStack?.name ?? "General";
+  const hadStack = Boolean(findStackByName(stacks, stackName));
+  const ensured = ensureEncyclopediaStackNamed(stacks, stackName);
+  stacks = ensured.stacks;
+  if (!hadStack && seriesStack?.color) {
+    stacks = stacks.map((s) =>
+      s.id === ensured.stack.id ? { ...s, color: seriesStack.color } : s,
+    );
+  }
+
+  const clone = createEncyclopediaEntry({
+    ...structuredClone(entry),
+    id: createId(),
+    stackId: ensured.stack.id,
+    memberIds: [], // membership is book-local cast
+    memberLocationIds: [],
+    continuityNotes: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+
+  return {
+    book: {
+      ...book,
+      encyclopediaStacks: sortEncyclopediaStacks(stacks),
+      encyclopedia: [...(book.encyclopedia ?? []), clone],
+      updatedAt: Date.now(),
+    },
+    entry: clone,
+    alreadyHad: false,
+  };
+}
+
+export function promoteEncyclopediaToSeries(
+  series: Series,
+  entry: EncyclopediaEntry,
+  bookStacks: EncyclopediaStack[],
+): Series {
+  let stacks = [...(series.encyclopediaStacks ?? [])];
+  const bookStack = bookStacks.find((s) => s.id === entry.stackId);
+  const stackName = bookStack?.name ?? "General";
+  const hadStack = Boolean(findStackByName(stacks, stackName));
+  const ensured = ensureEncyclopediaStackNamed(stacks, stackName);
+  stacks = ensured.stacks;
+  if (!hadStack && bookStack?.color) {
+    stacks = stacks.map((s) =>
+      s.id === ensured.stack.id ? { ...s, color: bookStack.color } : s,
+    );
+  }
+
+  const existing = findEncyclopediaByTitle(series.encyclopedia ?? [], entry.title);
+  const payload = createEncyclopediaEntry({
+    ...structuredClone(entry),
+    stackId: ensured.stack.id,
+    memberIds: [],
+    memberLocationIds: [],
+    continuityNotes: entry.continuityNotes ?? [],
+  });
+
+  if (existing) {
+    const existingLen =
+      (existing.wiki?.length ?? 0) + (existing.shortBio?.length ?? 0);
+    const incomingLen =
+      (entry.wiki?.length ?? 0) + (entry.shortBio?.length ?? 0);
+    if (incomingLen <= existingLen) {
+      return {
+        ...series,
+        encyclopediaStacks: sortEncyclopediaStacks(stacks),
+        updatedAt: Date.now(),
+      };
+    }
+    return {
+      ...series,
+      encyclopediaStacks: sortEncyclopediaStacks(stacks),
+      encyclopedia: (series.encyclopedia ?? []).map((e) =>
+        e.id === existing.id
+          ? createEncyclopediaEntry({
+              ...payload,
+              id: existing.id,
+              createdAt: existing.createdAt,
+              updatedAt: Date.now(),
+            })
+          : e,
+      ),
+      updatedAt: Date.now(),
+    };
+  }
+
+  return {
+    ...series,
+    encyclopediaStacks: sortEncyclopediaStacks(stacks),
+    encyclopedia: [
+      ...(series.encyclopedia ?? []),
+      createEncyclopediaEntry({
+        ...payload,
+        id: createId(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }),
+    ],
+    updatedAt: Date.now(),
+  };
+}
+
+export function seriesEncyclopediaMissingFromBook(
+  series: Series | undefined,
+  book: Book,
+): EncyclopediaEntry[] {
+  if (!series) return [];
+  return (series.encyclopedia ?? []).filter(
+    (e) => !findEncyclopediaByTitle(book.encyclopedia ?? [], e.title),
   );
 }

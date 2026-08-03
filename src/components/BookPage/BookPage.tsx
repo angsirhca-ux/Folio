@@ -5,8 +5,10 @@ import { motion } from "framer-motion";
 import type { Editor } from "@tiptap/react";
 import { ManuscriptEditor } from "@/components/Editor/ManuscriptEditor";
 import type { ReviewHighlightItem } from "@/components/Editor/ReviewHighlight";
+import type { MentionActivate } from "@/components/Editor/MentionHint";
 import { useBook } from "@/providers/BookProvider";
 import { latestPassForChapter } from "@/lib/developmentalEditor";
+import { collectMentionTerms } from "@/lib/mentionHints";
 import type { DevelopmentalPassKind } from "@/lib/types";
 
 interface BookPageProps {
@@ -16,6 +18,7 @@ interface BookPageProps {
   showReviewHighlights?: boolean;
   /** Only highlight flags from this pass tab (style / story / line / continuity). */
   reviewPassKind?: DevelopmentalPassKind | null;
+  onMentionActivate?: (hit: MentionActivate) => void;
 }
 
 export function BookPage({
@@ -23,6 +26,7 @@ export function BookPage({
   activeReviewFlagId = null,
   showReviewHighlights = false,
   reviewPassKind = null,
+  onMentionActivate,
 }: BookPageProps) {
   const {
     book,
@@ -77,6 +81,11 @@ export function BookPage({
     activeChapter.id,
   ]);
 
+  const mentionTerms = useMemo(
+    () => (settings.focusMode ? [] : collectMentionTerms(book)),
+    [book, settings.focusMode],
+  );
+
   return (
     <motion.article
       key={activeChapter.id}
@@ -115,6 +124,8 @@ export function BookPage({
         activeReviewFlagId={
           showReviewHighlights ? activeReviewFlagId : null
         }
+        mentionTerms={mentionTerms}
+        onMentionActivate={onMentionActivate}
       />
     </motion.article>
   );

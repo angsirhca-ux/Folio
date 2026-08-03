@@ -291,6 +291,31 @@ body {
   box-shadow: inset 0 -1px 0 rgba(196, 168, 72, 0.35);
 }
 
+/* Bible mention hints — soft underline; click opens card (no auto-wiki) */
+.manuscript-editor .mention-hint {
+  border-bottom: 1px dotted color-mix(in srgb, var(--accent) 42%, transparent);
+  border-radius: 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  cursor: pointer;
+  transition: background 0.2s var(--ease-apple), border-color 0.2s var(--ease-apple);
+}
+
+.manuscript-editor .mention-hint:hover {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.manuscript-editor .mention-hint--character {
+  border-bottom-style: solid;
+  border-bottom-width: 1px;
+  border-bottom-color: color-mix(in srgb, var(--ink-muted) 35%, transparent);
+}
+
+.manuscript-editor .mention-hint--location {
+  border-bottom-style: dashed;
+}
+
 /* Toolbar */
 .folio-toolbar {
   backdrop-filter: blur(16px) saturate(1.1);

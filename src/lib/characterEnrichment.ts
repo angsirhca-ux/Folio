@@ -309,6 +309,11 @@ export function characterSnapshotForPrompt(character: Character): string {
       arc: character.arc,
       secrets: character.secrets,
       tags: character.tags.filter((t) => t !== "from-story"),
+      belongsToIds: character.belongsToIds ?? [],
+      continuityNotes: (character.continuityNotes ?? []).map((n) => ({
+        asOf: n.asOf,
+        note: n.note,
+      })),
       relationships: character.relationships.map((r) => ({
         toName: r.toName,
         label: r.label,

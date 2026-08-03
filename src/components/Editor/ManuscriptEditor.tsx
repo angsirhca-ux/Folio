@@ -10,10 +10,16 @@ import CharacterCount from "@tiptap/extension-character-count";
 import { SceneBreak } from "@/components/Editor/SceneBreak";
 import { ReviewHighlight } from "@/components/Editor/ReviewHighlight";
 import type { ReviewHighlightItem } from "@/components/Editor/ReviewHighlight";
+import {
+  MentionHint,
+  type MentionActivate,
+} from "@/components/Editor/MentionHint";
+import type { MentionTerm } from "@/lib/mentionHints";
 import { focusEditorScene } from "@/lib/focusEditorScene";
 import { cn } from "@/lib/utils";
 
 const CONTENT_DEBOUNCE_MS = 320;
+const MENTION_REFRESH_MS = 520;
 
 interface ManuscriptEditorProps {
   content: string;
@@ -27,6 +33,9 @@ interface ManuscriptEditorProps {
   /** Developmental-editor excerpts to gently highlight. */
   reviewHighlights?: ReviewHighlightItem[];
   activeReviewFlagId?: string | null;
+  /** Bible titles to soft-underline in prose. */
+  mentionTerms?: MentionTerm[];
+  onMentionActivate?: (hit: MentionActivate) => void;
 }
 
 export function ManuscriptEditor({
@@ -39,12 +48,17 @@ export function ManuscriptEditor({
   sceneFocus,
   reviewHighlights = [],
   activeReviewFlagId = null,
+  mentionTerms = [],
+  onMentionActivate,
 }: ManuscriptEditorProps) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onMentionRef = useRef(onMentionActivate);
+  onMentionRef.current = onMentionActivate;
 
   const latestHtmlRef = useRef(content);
   const debounceRef = useRef<number | null>(null);
+  const mentionRefreshRef = useRef<number | null>(null);
   const focusedRef = useRef(false);
   const applyingExternalRef = useRef(false);
 
@@ -91,6 +105,9 @@ export function ManuscriptEditor({
       CharacterCount,
       SceneBreak,
       ReviewHighlight,
+      MentionHint.configure({
+        onActivate: (hit) => onMentionRef.current?.(hit),
+      }),
     ],
     content,
     editable,
@@ -114,6 +131,13 @@ export function ManuscriptEditor({
     onUpdate: ({ editor: ed }) => {
       if (applyingExternalRef.current) return;
       scheduleToParent(ed.getHTML());
+      if (mentionRefreshRef.current != null) {
+        window.clearTimeout(mentionRefreshRef.current);
+      }
+      mentionRefreshRef.current = window.setTimeout(() => {
+        mentionRefreshRef.current = null;
+        if (!ed.isDestroyed) ed.commands.refreshMentionHints();
+      }, MENTION_REFRESH_MS);
     },
   });
 
@@ -131,6 +155,10 @@ export function ManuscriptEditor({
         window.clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
+      if (mentionRefreshRef.current != null) {
+        window.clearTimeout(mentionRefreshRef.current);
+        mentionRefreshRef.current = null;
+      }
       flush(latestHtmlRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/unmount only; flush must bind the opening onChange
@@ -145,6 +173,7 @@ export function ManuscriptEditor({
     editor.commands.setContent(content, { emitUpdate: false });
     latestHtmlRef.current = content;
     applyingExternalRef.current = false;
+    editor.commands.refreshMentionHints();
   }, [content, editor]);
 
   useEffect(() => {
@@ -161,6 +190,11 @@ export function ManuscriptEditor({
     if (!editor || editor.isDestroyed) return;
     editor.commands.setActiveReviewHighlight(activeReviewFlagId);
   }, [editor, activeReviewFlagId]);
+
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    editor.commands.setMentionTerms(mentionTerms);
+  }, [editor, mentionTerms]);
 
   useEffect(() => {
     if (!editor || !sceneFocus) return;

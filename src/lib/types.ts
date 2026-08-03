@@ -34,6 +34,19 @@ export interface CharacterRelationship {
   notes: string;
 }
 
+/**
+ * A dated continuity crumb on a bible card —
+ * “as of Ch. 12: believes X.” Not a full progression system.
+ */
+export interface ContinuityNote {
+  id: string;
+  /** Freeform anchor — “Ch. 12”, “After the fire”, “draft 3”. */
+  asOf: string;
+  note: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -67,6 +80,10 @@ export interface Character {
     endingPoint: string;
   };
   relationships: CharacterRelationship[];
+  /** Encyclopedia cards this character belongs to (faction, species…). */
+  belongsToIds: string[];
+  /** Light progressions — what is true as of a chapter or moment. */
+  continuityNotes: ContinuityNote[];
   secrets: string;
   tags: string[];
   /**
@@ -154,6 +171,10 @@ export interface Location {
   connections: LocationConnection[];
   /** Character names who inhabit or frequent this place. */
   inhabitants: string[];
+  /** Encyclopedia cards this place belongs to (region, institution…). */
+  belongsToIds: string[];
+  /** Light progressions — what is true as of a chapter or moment. */
+  continuityNotes: ContinuityNote[];
   secrets: string;
   tags: string[];
   /**
@@ -274,12 +295,40 @@ export interface EncyclopediaEntry {
   links: EncyclopediaLink[];
   linkedCharacters: string[];
   linkedLocations: string[];
+  /** Cast members tied to this card (faction, species, institution…). */
+  memberIds: string[];
+  /** Places tied to this card (territory, HQ, sacred site…). */
+  memberLocationIds: string[];
+  /** Light progressions — what is true as of a chapter or moment. */
+  continuityNotes: ContinuityNote[];
+  /** Optional JPEG/PNG data URL for the card shelf. */
+  coverImage?: string;
+  coverName?: string;
   tags: string[];
   /**
    * Auto-refreshed digest from scenes, labels, and prose.
    * Safe to overwrite on sync — separate from freeform `wiki`.
    */
   storyDigest: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * A dated (or ordered) event in the world’s history — not a plot beat.
+ * Links into encyclopedia / cast / places for the lore bible.
+ */
+export interface ChronicleEvent {
+  id: string;
+  title: string;
+  summary: string;
+  /** Sort key — lower is earlier. */
+  order: number;
+  /** Freeform when — “Age of Ash”, “1123”, “Before the war”. */
+  whenLabel: string;
+  linkedEntryIds: string[];
+  linkedCharacterIds: string[];
+  linkedLocationIds: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -355,7 +404,7 @@ export interface TrashedBook {
   book: Book;
 }
 
-/** Shared cast / places across books in a series. */
+/** Shared cast / places / lore across books in a series. */
 export interface Series {
   id: string;
   title: string;
@@ -364,6 +413,8 @@ export interface Series {
   notes: string;
   characters: Character[];
   locations: Location[];
+  encyclopedia: EncyclopediaEntry[];
+  encyclopediaStacks: EncyclopediaStack[];
   createdAt: number;
   updatedAt: number;
 }
@@ -427,6 +478,8 @@ export interface Book {
   encyclopedia: EncyclopediaEntry[];
   /** User-named stacks that group encyclopedia cards. */
   encyclopediaStacks: EncyclopediaStack[];
+  /** World history events (lore chronicle — not plot Timeline). */
+  chronicle: ChronicleEvent[];
   /**
    * All story maps for this book (London streets, fantasy continent, …).
    * One is active at a time via `activeMapId`.

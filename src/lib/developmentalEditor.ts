@@ -12,6 +12,7 @@ import type {
 } from "./types";
 import { DEVELOPMENTAL_CATEGORY_META } from "./types";
 import { createId } from "./utils";
+import { continuityNotesForPrompt } from "./continuity";
 
 export const REVIEW_TOOL_NAME = "save_editorial_review";
 
@@ -451,6 +452,9 @@ export function buildCharacterVoiceSnippets(
       c.psychology?.fears?.trim()
         ? `fears: ${c.psychology.fears.trim().slice(0, 120)}`
         : "",
+      continuityNotesForPrompt(c.continuityNotes, 4)
+        ? `as-of:\n    ${continuityNotesForPrompt(c.continuityNotes, 4).split("\n").join("\n    ")}`
+        : "",
     ].filter(Boolean);
     if (bits.length === 0) continue;
     const block = `- ${c.name}\n  ${bits.join("\n  ")}`;
@@ -496,11 +500,21 @@ export function buildReviewContext(args: {
   const plain = truncateChapterPlain(chapterToPlainText(args.chapter.content));
   const cast = (args.book.characters ?? [])
     .slice(0, 40)
-    .map((c) => `- ${c.name}${c.shortBio ? `: ${c.shortBio}` : ""}`)
+    .map((c) => {
+      const asOf = continuityNotesForPrompt(c.continuityNotes, 3);
+      return `- ${c.name}${c.shortBio ? `: ${c.shortBio}` : ""}${
+        asOf ? `\n  ${asOf.split("\n").join("\n  ")}` : ""
+      }`;
+    })
     .join("\n");
   const places = (args.book.locations ?? [])
     .slice(0, 40)
-    .map((l) => `- ${l.name}${l.shortBio ? `: ${l.shortBio}` : ""}`)
+    .map((l) => {
+      const asOf = continuityNotesForPrompt(l.continuityNotes, 3);
+      return `- ${l.name}${l.shortBio ? `: ${l.shortBio}` : ""}${
+        asOf ? `\n  ${asOf.split("\n").join("\n  ")}` : ""
+      }`;
+    })
     .join("\n");
   const { preferencesBlock, generalBlock } = formatMemoryBlocks(args.memory);
   const voiceBible =

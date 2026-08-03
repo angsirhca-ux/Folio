@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -12,6 +12,7 @@ import {
   encyclopediaAppearances,
   sortEncyclopediaStacks,
 } from "@/lib/encyclopedia";
+import { prepareCoverImage } from "@/lib/coverImage";
 import type { EncyclopediaEntry, EncyclopediaStack } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -34,9 +35,12 @@ export function EncyclopediaPanel({
     addEncyclopedia,
     updateEncyclopedia,
     addEncyclopediaStack,
+    setEncyclopediaMemberCharacters,
     focusScene,
   } = useBook();
   const [query, setQuery] = useState("");
+  const [coverBusy, setCoverBusy] = useState(false);
+  const coverInputRef = useRef<HTMLInputElement>(null);
 
   const entries = book.encyclopedia ?? [];
   const stacks = useMemo(
@@ -218,6 +222,106 @@ export function EncyclopediaPanel({
                   rows={3}
                   placeholder="What you’ve distilled"
                 />
+
+                <div>
+                  <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+                    Cover
+                  </p>
+                  {entry.coverImage ? (
+                    <div className="mt-2 overflow-hidden rounded-xl border border-[rgba(45,42,38,0.08)]">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={entry.coverImage}
+                        alt=""
+                        className="max-h-28 w-full object-cover"
+                      />
+                    </div>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <input
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!file) return;
+                        setCoverBusy(true);
+                        void prepareCoverImage(file)
+                          .then((prepared) => {
+                            patch({
+                              coverImage: prepared.dataUrl,
+                              coverName: prepared.name,
+                            });
+                          })
+                          .catch(() => {
+                            /* ignore in panel */
+                          })
+                          .finally(() => setCoverBusy(false));
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 rounded-full text-xs"
+                      disabled={coverBusy}
+                      onClick={() => coverInputRef.current?.click()}
+                    >
+                      {entry.coverImage ? "Replace" : "Add cover"}
+                    </Button>
+                    {entry.coverImage ? (
+                      <button
+                        type="button"
+                        className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)] hover:text-[#6B3A2A]"
+                        onClick={() =>
+                          patch({
+                            coverImage: undefined,
+                            coverName: undefined,
+                          })
+                        }
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                {(book.characters ?? []).length > 0 ? (
+                  <div>
+                    <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+                      Members
+                    </p>
+                    <ul className="mt-2 max-h-36 space-y-1 overflow-y-auto">
+                      {(book.characters ?? []).map((c) => {
+                        const on = (entry.memberIds ?? []).includes(c.id);
+                        return (
+                          <li key={c.id}>
+                            <label className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1 hover:bg-[rgba(45,42,38,0.04)]">
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                onChange={() => {
+                                  const next = on
+                                    ? entry.memberIds.filter((id) => id !== c.id)
+                                    : [...(entry.memberIds ?? []), c.id];
+                                  setEncyclopediaMemberCharacters(
+                                    entry.id,
+                                    next,
+                                  );
+                                }}
+                              />
+                              <span className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                                {c.name}
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : null}
 
                 {appearances.length > 0 ? (
                   <div>

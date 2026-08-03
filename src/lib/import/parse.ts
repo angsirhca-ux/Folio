@@ -164,6 +164,7 @@ export function parsedToBook(
     research: existing?.research ?? [],
     encyclopedia: existing?.encyclopedia ?? [],
     encyclopediaStacks: existing?.encyclopediaStacks ?? [],
+    chronicle: existing?.chronicle ?? [],
     trash: existing?.trash ?? [],
     map: existing?.map ?? emptyStoryMap(),
     maps: existing?.maps ?? [],

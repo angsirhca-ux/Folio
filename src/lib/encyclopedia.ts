@@ -12,6 +12,7 @@ import { LEGACY_ENCYCLOPEDIA_KIND_LABEL } from "./types";
 import { createId } from "./utils";
 import { getSceneHtmlParts } from "./manuscriptScenes";
 import { namesMatch } from "./research";
+import { normalizeContinuityNotes } from "./continuity";
 
 /** Muted Folio accents for encyclopedia stacks — calm, glanceable, not neon. */
 export const ENCYCLOPEDIA_STACK_PALETTE = [
@@ -79,11 +80,70 @@ export function createEncyclopediaEntry(
     links: partial.links ?? [],
     linkedCharacters: partial.linkedCharacters ?? [],
     linkedLocations: partial.linkedLocations ?? [],
+    memberIds: partial.memberIds ?? [],
+    memberLocationIds: partial.memberLocationIds ?? [],
+    continuityNotes: normalizeContinuityNotes(partial.continuityNotes),
+    coverImage: partial.coverImage,
+    coverName: partial.coverName,
     tags: partial.tags ?? [],
     storyDigest: partial.storyDigest ?? "",
     createdAt: partial.createdAt ?? now,
     updatedAt: partial.updatedAt ?? now,
   };
+}
+
+/** Optional shelf starter packs — applied once when creating stacks. */
+export const ENCYCLOPEDIA_STACK_STARTERS: Array<{
+  id: string;
+  label: string;
+  hint: string;
+  stacks: string[];
+}> = [
+  {
+    id: "blank",
+    label: "Blank",
+    hint: "Start empty — name stacks yourself",
+    stacks: [],
+  },
+  {
+    id: "fantasy",
+    label: "Fantasy",
+    hint: "Customs, magic, creatures, factions…",
+    stacks: ["Customs", "Magic", "Creatures", "Factions", "Items", "Mythology"],
+  },
+  {
+    id: "mystery",
+    label: "Mystery",
+    hint: "Case files, evidence, motives…",
+    stacks: ["Case files", "Evidence", "Motives", "Places of interest"],
+  },
+  {
+    id: "historical",
+    label: "Historical",
+    hint: "Period detail, institutions, customs…",
+    stacks: ["Period detail", "Institutions", "Customs", "Figures"],
+  },
+  {
+    id: "contemporary",
+    label: "Contemporary",
+    hint: "Institutions, subcultures, settings…",
+    stacks: ["Institutions", "Subcultures", "Technology", "Settings"],
+  },
+];
+
+/** Add missing starter stacks onto a book’s shelf (idempotent by name). */
+export function applyEncyclopediaStackStarter(
+  stacks: EncyclopediaStack[],
+  starterId: string,
+): EncyclopediaStack[] {
+  const starter = ENCYCLOPEDIA_STACK_STARTERS.find((s) => s.id === starterId);
+  if (!starter || starter.stacks.length === 0) return stacks;
+  let next = [...stacks];
+  for (const name of starter.stacks) {
+    const ensured = ensureEncyclopediaStackNamed(next, name);
+    next = ensured.stacks;
+  }
+  return sortEncyclopediaStacks(next);
 }
 
 /** Convert a legacy research "lore" entry into an encyclopedia article. */
@@ -134,6 +194,10 @@ export function encyclopediaCompleteness(entry: EncyclopediaEntry): number {
     entry.links.length > 0 ? "x" : "",
     entry.linkedCharacters.length > 0 ? "x" : "",
     entry.linkedLocations.length > 0 ? "x" : "",
+    entry.memberIds.length > 0 ? "x" : "",
+    entry.memberLocationIds.length > 0 ? "x" : "",
+    entry.coverImage ? "x" : "",
+    entry.continuityNotes.length > 0 ? "x" : "",
     entry.aliases.length > 0 ? "x" : "",
     entry.tags.length > 0 ? "x" : "",
   ];

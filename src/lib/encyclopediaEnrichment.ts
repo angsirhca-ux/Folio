@@ -204,6 +204,12 @@ export function encyclopediaSnapshotForPrompt(entry: EncyclopediaEntry): string 
       summary: entry.summary,
       linkedCharacters: entry.linkedCharacters,
       linkedLocations: entry.linkedLocations,
+      memberIds: entry.memberIds ?? [],
+      memberLocationIds: entry.memberLocationIds ?? [],
+      continuityNotes: (entry.continuityNotes ?? []).map((n) => ({
+        asOf: n.asOf,
+        note: n.note,
+      })),
       tags: entry.tags.filter((t) => t !== "from-story" && t !== "label"),
     },
     null,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   PanelLeft,
@@ -38,9 +39,11 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useBook } from "@/providers/BookProvider";
 import { AppShell } from "@/components/Sidebar/AppShell";
 import { cn } from "@/lib/utils";
+import type { MentionActivate } from "@/components/Editor/MentionHint";
 import type { DevelopmentalPassKind } from "@/lib/types";
 
 export function WritingApp() {
+  const router = useRouter();
   const {
     settings,
     activeChapter,
@@ -123,6 +126,22 @@ export function WritingApp() {
     setResearchOpen(false);
     setEncyclopediaOpen(true);
   }
+
+  const onMentionActivate = useCallback(
+    (hit: MentionActivate) => {
+      if (hit.kind === "encyclopedia") {
+        setEncyclopediaEntryId(hit.id);
+        openEncyclopedia();
+        return;
+      }
+      if (hit.kind === "character") {
+        router.push(`/characters/${hit.id}`);
+        return;
+      }
+      router.push(`/locations/${hit.id}`);
+    },
+    [router],
+  );
 
   const handlers = useMemo(
     () => ({
@@ -437,6 +456,7 @@ export function WritingApp() {
           activeReviewFlagId={activeReviewFlagId}
           showReviewHighlights={editorOpen}
           reviewPassKind={reviewPassKind}
+          onMentionActivate={onMentionActivate}
         />
       </main>
 

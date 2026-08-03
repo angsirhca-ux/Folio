@@ -27,6 +27,8 @@ import {
   type Character,
   type CharacterRole,
 } from "@/lib/types";
+import { ContinuityNotesSection } from "@/components/Bible/ContinuityNotesSection";
+import { MembershipChecklist } from "@/components/Bible/MembershipChecklist";
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -35,6 +37,7 @@ const SECTIONS = [
   { id: "voice", label: "Voice" },
   { id: "arc", label: "Arc" },
   { id: "relationships", label: "Ties" },
+  { id: "continuity", label: "As-of" },
   { id: "appearances", label: "On the page" },
 ] as const;
 
@@ -49,6 +52,7 @@ export function CharacterWikiPage({ characterId }: { characterId: string }) {
     addCharacterRelationship,
     updateCharacterRelationship,
     removeCharacterRelationship,
+    setCharacterBelongsToEntries,
     focusScene,
     promoteCharacterToSeriesBible,
   } = useBook();
@@ -458,6 +462,22 @@ export function CharacterWikiPage({ characterId }: { characterId: string }) {
           </WikiSection>
 
           <WikiSection id="relationships" title="Ties" index={5}>
+            <MembershipChecklist
+              label="Belongs to"
+              hint="Encyclopedia cards this person is part of — faction, species, institution."
+              items={(book.encyclopedia ?? []).map((e) => ({
+                id: e.id,
+                label: e.title,
+                href: `/encyclopedia/${e.id}`,
+              }))}
+              selected={character.belongsToIds ?? []}
+              onChange={(ids) =>
+                setCharacterBelongsToEntries(characterId, ids)
+              }
+              emptyHint="Add encyclopedia cards first, then mark membership here."
+            />
+
+            <div className="mt-10">
             {character.relationships.length === 0 ? (
               <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
                 No ties yet. Add how they stand toward others — rival, sister,
@@ -582,9 +602,17 @@ export function CharacterWikiPage({ characterId }: { characterId: string }) {
                 Add
               </Button>
             </form>
+            </div>
           </WikiSection>
 
-          <WikiSection id="appearances" title="On the page" index={6}>
+          <WikiSection id="continuity" title="As-of notes" index={6}>
+            <ContinuityNotesSection
+              notes={character.continuityNotes ?? []}
+              onChange={(continuityNotes) => patch({ continuityNotes })}
+            />
+          </WikiSection>
+
+          <WikiSection id="appearances" title="On the page" index={7}>
             <AppearancesRail
               appearances={appearances}
               onOpenScene={focusScene}

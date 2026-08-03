@@ -10,6 +10,11 @@ import { useBook } from "@/providers/BookProvider";
 import { booksInSeries, findSeries } from "@/lib/series";
 import { createCharacter } from "@/lib/characters";
 import { createLocation } from "@/lib/locations";
+import {
+  createEncyclopediaEntry,
+  ensureEncyclopediaStackNamed,
+  sortEncyclopediaStacks,
+} from "@/lib/encyclopedia";
 import { formatWordCount } from "@/lib/utils";
 import { bookWordCount } from "@/lib/trash";
 
@@ -88,9 +93,9 @@ export function SeriesPage({ seriesId }: { seriesId: string }) {
           className="mt-3 w-full bg-transparent font-[family-name:var(--font-display)] text-4xl font-medium tracking-tight text-[var(--ink)] focus:outline-none"
         />
         <p className="mt-4 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
-          Shared cast and places for every book in this series. Bring entries
-          into a manuscript when that book needs them — books stay free to
-          diverge.
+        Shared cast, places, and encyclopedia for every book in this series.
+          Bring entries into a manuscript when that book needs them — books stay
+          free to diverge.
         </p>
       </header>
 
@@ -333,6 +338,109 @@ export function SeriesPage({ seriesId }: { seriesId: string }) {
                 </button>
               </li>
             ))
+          )}
+        </ul>
+      </section>
+
+      <section className="mb-10">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+            Shared encyclopedia
+          </h2>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 rounded-full"
+            onClick={() => {
+              let stacks = [...(series.encyclopediaStacks ?? [])];
+              if (stacks.length === 0) {
+                const ensured = ensureEncyclopediaStackNamed(stacks, "General");
+                stacks = ensured.stacks;
+              }
+              const entry = createEncyclopediaEntry({
+                title: "New article",
+                stackId: stacks[0].id,
+              });
+              updateSeries(series.id, {
+                encyclopediaStacks: sortEncyclopediaStacks(stacks),
+                encyclopedia: [...(series.encyclopedia ?? []), entry],
+              });
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Add
+          </Button>
+        </div>
+        <ul className="mt-3 space-y-4">
+          {(series.encyclopedia ?? []).length === 0 ? (
+            <li className="font-[family-name:var(--font-ui)] text-sm italic text-[var(--ink-faint)]">
+              Empty — promote from Encyclopedia, or add here.
+            </li>
+          ) : (
+            (series.encyclopedia ?? []).map((e) => {
+              const stackName =
+                (series.encyclopediaStacks ?? []).find((s) => s.id === e.stackId)
+                  ?.name ?? "General";
+              return (
+                <li
+                  key={e.id}
+                  className="rounded-2xl border border-[rgba(45,42,38,0.06)] bg-[rgba(247,243,234,0.35)] px-4 py-3"
+                >
+                  <p className="font-[family-name:var(--font-ui)] text-[0.62rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
+                    {stackName}
+                  </p>
+                  <input
+                    value={e.title}
+                    onChange={(ev) =>
+                      updateSeries(series.id, {
+                        encyclopedia: (series.encyclopedia ?? []).map((x) =>
+                          x.id === e.id
+                            ? {
+                                ...x,
+                                title: ev.target.value,
+                                updatedAt: Date.now(),
+                              }
+                            : x,
+                        ),
+                      })
+                    }
+                    className="mt-1 w-full bg-transparent font-[family-name:var(--font-display)] text-lg text-[var(--ink)] focus:outline-none"
+                  />
+                  <textarea
+                    value={e.shortBio}
+                    onChange={(ev) =>
+                      updateSeries(series.id, {
+                        encyclopedia: (series.encyclopedia ?? []).map((x) =>
+                          x.id === e.id
+                            ? {
+                                ...x,
+                                shortBio: ev.target.value,
+                                updatedAt: Date.now(),
+                              }
+                            : x,
+                        ),
+                      })
+                    }
+                    rows={2}
+                    placeholder="One-line canon blurb…"
+                    className="mt-2 w-full resize-none bg-transparent font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)] placeholder:text-[var(--ink-faint)] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    className="mt-2 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)] hover:text-[#6B3A2A]"
+                    onClick={() =>
+                      updateSeries(series.id, {
+                        encyclopedia: (series.encyclopedia ?? []).filter(
+                          (x) => x.id !== e.id,
+                        ),
+                      })
+                    }
+                  >
+                    Remove from bible
+                  </button>
+                </li>
+              );
+            })
           )}
         </ul>
       </section>

@@ -17,6 +17,7 @@ import {
   nextEncyclopediaStackColor,
   sortEncyclopediaStacks,
   ENCYCLOPEDIA_STACK_PALETTE,
+  ENCYCLOPEDIA_STACK_STARTERS,
 } from "@/lib/encyclopedia";
 import {
   discoverEncyclopediaWithClaude,
@@ -26,6 +27,7 @@ import {
 } from "@/hooks/useClaudeEnrichment";
 import type { EncyclopediaEntry } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { SeriesBibleStrip } from "@/components/Series/SeriesBibleStrip";
 
 type StackItem = {
   entry: EncyclopediaEntry;
@@ -45,6 +47,7 @@ export function EncyclopediaPage() {
     updateEncyclopediaStack,
     deleteEncyclopediaStack,
     ensureEncyclopediaStack,
+    applyEncyclopediaStarter,
   } = useBook();
   const claude = useClaudeStatus();
   const [search, setSearch] = useState("");
@@ -322,6 +325,8 @@ export function EncyclopediaPage() {
           </div>
         </header>
 
+        <SeriesBibleStrip kind="encyclopedia" />
+
         <div className="mb-10 flex flex-wrap items-center gap-2 rounded-2xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.7)] px-3 py-2.5 shadow-[0_10px_36px_rgba(45,42,38,0.06)] backdrop-blur-xl sm:gap-3 sm:px-4">
           <label className="relative flex min-w-[10rem] max-w-md flex-1 items-center">
             <Search
@@ -436,20 +441,41 @@ export function EncyclopediaPage() {
             No cards match
           </p>
         ) : stacks.length === 0 ? (
-          <div className="flex min-h-[14rem] flex-col items-center justify-center gap-3 rounded-[1.75rem] border border-dashed border-[rgba(45,42,38,0.14)] bg-[rgba(247,243,234,0.4)] px-6 text-center">
+          <div className="flex min-h-[14rem] flex-col items-center justify-center gap-4 rounded-[1.75rem] border border-dashed border-[rgba(45,42,38,0.14)] bg-[rgba(247,243,234,0.4)] px-6 py-10 text-center">
             <p className="font-[family-name:var(--font-display)] text-2xl text-[var(--ink)]">
               No stacks yet
             </p>
             <p className="max-w-sm font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
-              Add a stack named for your genre — then fill it with cards.
+              Start blank, or drop in a starter pack for your genre — then rename
+              freely.
             </p>
+            <div className="mt-2 grid w-full max-w-lg gap-2 sm:grid-cols-2">
+              {ENCYCLOPEDIA_STACK_STARTERS.filter((s) => s.id !== "blank").map(
+                (starter) => (
+                  <button
+                    key={starter.id}
+                    type="button"
+                    onClick={() => applyEncyclopediaStarter(starter.id)}
+                    className="rounded-2xl border border-[rgba(45,42,38,0.1)] bg-[rgba(252,249,243,0.85)] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_40%,rgba(45,42,38,0.1))]"
+                  >
+                    <span className="block font-[family-name:var(--font-display)] text-lg text-[var(--ink)]">
+                      {starter.label}
+                    </span>
+                    <span className="mt-1 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                      {starter.hint}
+                    </span>
+                  </button>
+                ),
+              )}
+            </div>
             <Button
               size="sm"
+              variant="outline"
               className="mt-2 gap-1.5 rounded-full"
               onClick={beginAddStack}
             >
               <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
-              New stack
+              Name your own stack
             </Button>
           </div>
         ) : (
@@ -733,50 +759,68 @@ function StackCard({
         type="button"
         onClick={onOpen}
         className={cn(
-          "group relative flex h-[17.5rem] w-full flex-col overflow-hidden rounded-[1.35rem] border bg-[rgba(252,249,243,0.92)] p-5 text-left shadow-[0_14px_28px_rgba(45,42,38,0.08)] transition-transform duration-300",
+          "group relative flex h-[17.5rem] w-full flex-col overflow-hidden rounded-[1.35rem] border bg-[rgba(252,249,243,0.92)] text-left shadow-[0_14px_28px_rgba(45,42,38,0.08)] transition-transform duration-300",
           "hover:-translate-y-1.5 hover:rotate-[-1deg]",
           selected
             ? "border-[color-mix(in_srgb,var(--accent)_55%,rgba(45,42,38,0.1))] ring-2 ring-[color-mix(in_srgb,var(--accent)_35%,transparent)]"
             : "border-[rgba(45,42,38,0.1)]",
         )}
       >
-        <span
-          className="absolute inset-x-0 top-0 h-1.5"
-          style={{ background: accent }}
-          aria-hidden
-        />
-        <span className="font-[family-name:var(--font-ui)] text-[0.62rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
-          {stackLabel}
-        </span>
-        <h3 className="mt-3 font-[family-name:var(--font-display)] text-2xl leading-tight text-[var(--ink)] transition-colors group-hover:text-[color-mix(in_srgb,var(--accent)_65%,var(--ink))]">
-          {entry.title || "Untitled"}
-        </h3>
-        <p
-          className={cn(
-            "mt-3 line-clamp-4 flex-1 font-[family-name:var(--font-ui)] text-sm leading-relaxed",
-            entry.shortBio
-              ? "text-[var(--ink-muted)]"
-              : "italic text-[var(--ink-faint)]",
-          )}
-        >
-          {entry.shortBio || "Open the card to write this piece of the world."}
-        </p>
-        <div className="mt-4 space-y-2">
-          <DepthMeter
-            depth={depth}
-            completeness={completeness}
-            compact
-            variant="encyclopedia"
-            className="w-full"
+        {entry.coverImage ? (
+          <span className="relative block h-24 w-full shrink-0 overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={entry.coverImage}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+            <span
+              className="absolute inset-x-0 top-0 h-1.5"
+              style={{ background: accent }}
+              aria-hidden
+            />
+          </span>
+        ) : (
+          <span
+            className="absolute inset-x-0 top-0 h-1.5"
+            style={{ background: accent }}
+            aria-hidden
           />
-          <p className="font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-faint)]">
-            {appearances === 0
-              ? "Not yet on the page"
-              : appearances === 1
-                ? "1 scene"
-                : `${appearances} scenes`}
+        )}
+        <span className="flex min-h-0 flex-1 flex-col p-5 pt-4">
+          <span className="font-[family-name:var(--font-ui)] text-[0.62rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+            {stackLabel}
+          </span>
+          <h3 className="mt-2 font-[family-name:var(--font-display)] text-2xl leading-tight text-[var(--ink)] transition-colors group-hover:text-[color-mix(in_srgb,var(--accent)_65%,var(--ink))]">
+            {entry.title || "Untitled"}
+          </h3>
+          <p
+            className={cn(
+              "mt-2 line-clamp-3 flex-1 font-[family-name:var(--font-ui)] text-sm leading-relaxed",
+              entry.shortBio
+                ? "text-[var(--ink-muted)]"
+                : "italic text-[var(--ink-faint)]",
+            )}
+          >
+            {entry.shortBio || "Open the card to write this piece of the world."}
           </p>
-        </div>
+          <div className="mt-3 space-y-2">
+            <DepthMeter
+              depth={depth}
+              completeness={completeness}
+              compact
+              variant="encyclopedia"
+              className="w-full"
+            />
+            <p className="font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-faint)]">
+              {appearances === 0
+                ? "Not yet on the page"
+                : appearances === 1
+                  ? "1 scene"
+                  : `${appearances} scenes`}
+            </p>
+          </div>
+        </span>
       </button>
     </motion.li>
   );

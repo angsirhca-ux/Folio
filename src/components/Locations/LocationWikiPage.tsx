@@ -27,6 +27,8 @@ import {
   type Location,
   type LocationKind,
 } from "@/lib/types";
+import { ContinuityNotesSection } from "@/components/Bible/ContinuityNotesSection";
+import { MembershipChecklist } from "@/components/Bible/MembershipChecklist";
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -35,6 +37,7 @@ const SECTIONS = [
   { id: "story", label: "Story" },
   { id: "people", label: "People" },
   { id: "connections", label: "Links" },
+  { id: "continuity", label: "As-of" },
   { id: "appearances", label: "On the page" },
 ] as const;
 
@@ -49,6 +52,7 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
     addLocationConnection,
     updateLocationConnection,
     removeLocationConnection,
+    setLocationBelongsToEntries,
     focusScene,
     promoteLocationToSeriesBible,
   } = useBook();
@@ -440,6 +444,22 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
           </WikiSection>
 
           <WikiSection id="connections" title="Links" index={5}>
+            <MembershipChecklist
+              label="Belongs to"
+              hint="Encyclopedia cards this place is part of — region, institution, sacred site."
+              items={(book.encyclopedia ?? []).map((e) => ({
+                id: e.id,
+                label: e.title,
+                href: `/encyclopedia/${e.id}`,
+              }))}
+              selected={location.belongsToIds ?? []}
+              onChange={(ids) =>
+                setLocationBelongsToEntries(locationId, ids)
+              }
+              emptyHint="Add encyclopedia cards first, then mark membership here."
+            />
+
+            <div className="mt-10">
             {location.connections.length === 0 ? (
               <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
                 No links yet. Connect places that border, lead to, or echo each
@@ -564,9 +584,17 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
                 Add
               </Button>
             </form>
+            </div>
           </WikiSection>
 
-          <WikiSection id="appearances" title="On the page" index={6}>
+          <WikiSection id="continuity" title="As-of notes" index={6}>
+            <ContinuityNotesSection
+              notes={location.continuityNotes ?? []}
+              onChange={(continuityNotes) => patch({ continuityNotes })}
+            />
+          </WikiSection>
+
+          <WikiSection id="appearances" title="On the page" index={7}>
             <LocationAppearancesRail
               appearances={appearances}
               onOpenScene={focusScene}

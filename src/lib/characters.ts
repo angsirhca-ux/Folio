@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import { createId } from "./utils";
 import { getSceneHtmlParts } from "./manuscriptScenes";
+import { normalizeContinuityNotes } from "./continuity";
 
 export function emptyIdentity() {
   return { age: "", occupation: "", appearance: "", distinguishing: "" };
@@ -48,6 +49,8 @@ export function createCharacter(
     voice: { ...emptyVoice(), ...partial.voice },
     arc: { ...emptyArc(), ...partial.arc },
     relationships: partial.relationships ?? [],
+    belongsToIds: partial.belongsToIds ?? [],
+    continuityNotes: normalizeContinuityNotes(partial.continuityNotes),
     secrets: partial.secrets ?? "",
     tags: partial.tags ?? [],
     storyDigest: partial.storyDigest ?? "",
@@ -256,6 +259,8 @@ export function ensureBookCharacters(
         arc: { ...emptyArc(), ...c.arc },
         relationships: c.relationships ?? [],
         aliases: c.aliases ?? [],
+        belongsToIds: c.belongsToIds ?? [],
+        continuityNotes: normalizeContinuityNotes(c.continuityNotes),
         tags: c.tags ?? [],
         storyDigest: c.storyDigest ?? "",
       }),

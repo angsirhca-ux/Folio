@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import { createId } from "./utils";
 import { getSceneHtmlParts } from "./manuscriptScenes";
+import { normalizeContinuityNotes } from "./continuity";
 
 export function emptySensory() {
   return { sight: "", sound: "", smell: "", atmosphere: "" };
@@ -38,6 +39,8 @@ export function createLocation(
     story: { ...emptyStory(), ...partial.story },
     connections: partial.connections ?? [],
     inhabitants: partial.inhabitants ?? [],
+    belongsToIds: partial.belongsToIds ?? [],
+    continuityNotes: normalizeContinuityNotes(partial.continuityNotes),
     secrets: partial.secrets ?? "",
     tags: partial.tags ?? [],
     storyDigest: partial.storyDigest ?? "",
@@ -484,6 +487,8 @@ export function ensureBookLocations(
         story: { ...emptyStory(), ...l.story },
         connections: l.connections ?? [],
         inhabitants: l.inhabitants ?? [],
+        belongsToIds: l.belongsToIds ?? [],
+        continuityNotes: l.continuityNotes,
         aliases: l.aliases ?? [],
         tags: l.tags ?? [],
         storyDigest: l.storyDigest ?? "",

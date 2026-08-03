@@ -34,6 +34,7 @@ import {
   createEncyclopediaEntry,
   createEncyclopediaStack,
 } from "./encyclopedia";
+import { ensureBookChronicle } from "./chronicle";
 import {
   bookSceneCount,
   bookWordCount,
@@ -84,6 +85,7 @@ export function createEmptyBook(): Book {
     research: [],
     encyclopedia: [],
     encyclopediaStacks: [],
+    chronicle: [],
     trash: [],
     map,
     maps: [map],
@@ -355,6 +357,7 @@ export function createSampleBook(): Book {
     research: [lettersTopic, houseTopic, duskTopic],
     encyclopedia: [duskCustom],
     encyclopediaStacks: [customsStack],
+    chronicle: [],
     trash: [],
     map: sampleMapForLocations([
       studyLoc,
@@ -403,6 +406,7 @@ function hydrateBook(
     | "locations"
     | "research"
     | "encyclopedia"
+    | "chronicle"
     | "trash"
     | "developmentalEditor"
     | "betaReaders"
@@ -417,6 +421,7 @@ function hydrateBook(
     locations?: Book["locations"];
     research?: Book["research"];
     encyclopedia?: Book["encyclopedia"];
+    chronicle?: Book["chronicle"];
     trash?: Book["trash"];
     developmentalEditor?: Book["developmentalEditor"];
     betaReaders?: Book["betaReaders"];
@@ -436,33 +441,36 @@ function hydrateBook(
           ensureBookMap(
             ensureDevelopmentalEditor(
               ensureBookTrash(
-                syncEncyclopediaFromManuscript(
-                  ensureBookResearch(
-                    ensureBookEncyclopedia(
-                      ensureBookFamilyTrees(
-                        ensureBookLocations(
-                          ensureBookCharacters({
-                            ...book,
-                            seriesId: book.seriesId ?? null,
-                            plotThreads: book.plotThreads ?? [],
-                            map: book.map ?? emptyStoryMap(),
-                            maps: book.maps,
-                            activeMapId: book.activeMapId,
-                            encyclopedia: book.encyclopedia ?? [],
-                            encyclopediaStacks: book.encyclopediaStacks ?? [],
-                            familyTrees: book.familyTrees ?? [],
-                            research: book.research ?? [],
-                            chapters: book.chapters.map((c) =>
-                              withScenes(
-                                syncChapterTitleField({
-                                  ...c,
-                                  summary: c.summary ?? "",
-                                  notes: c.notes ?? "",
-                                  scenes: c.scenes ?? [],
-                                }),
+                ensureBookChronicle(
+                  syncEncyclopediaFromManuscript(
+                    ensureBookResearch(
+                      ensureBookEncyclopedia(
+                        ensureBookFamilyTrees(
+                          ensureBookLocations(
+                            ensureBookCharacters({
+                              ...book,
+                              seriesId: book.seriesId ?? null,
+                              plotThreads: book.plotThreads ?? [],
+                              map: book.map ?? emptyStoryMap(),
+                              maps: book.maps,
+                              activeMapId: book.activeMapId,
+                              encyclopedia: book.encyclopedia ?? [],
+                              encyclopediaStacks: book.encyclopediaStacks ?? [],
+                              chronicle: book.chronicle ?? [],
+                              familyTrees: book.familyTrees ?? [],
+                              research: book.research ?? [],
+                              chapters: book.chapters.map((c) =>
+                                withScenes(
+                                  syncChapterTitleField({
+                                    ...c,
+                                    summary: c.summary ?? "",
+                                    notes: c.notes ?? "",
+                                    scenes: c.scenes ?? [],
+                                  }),
+                                ),
                               ),
-                            ),
-                          } as Book),
+                            } as Book),
+                          ),
                         ),
                       ),
                     ),
