@@ -121,15 +121,19 @@ export function ManuscriptEditor({
     if (editor && onEditorReady) onEditorReady(editor);
   }, [editor, onEditorReady]);
 
-  // Flush pending prose when the editor unmounts (chapter switch, navigate away).
+  // Flush pending prose to the document this instance was editing.
+  // Capture onChange at effect setup time so a chapter switch can't
+  // attribute this HTML to the newly active chapter.
   useEffect(() => {
+    const flush = onChange;
     return () => {
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      onChangeRef.current(latestHtmlRef.current);
+      flush(latestHtmlRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/unmount only; flush must bind the opening onChange
   }, []);
 
   useEffect(() => {

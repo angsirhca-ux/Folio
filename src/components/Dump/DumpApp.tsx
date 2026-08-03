@@ -58,7 +58,9 @@ export function DumpApp() {
             <ManuscriptEditor
               key={activeDumpPage.id}
               content={activeDumpPage.content}
-              onChange={updateDumpPageContent}
+              onChange={(html) =>
+                updateDumpPageContent(html, activeDumpPage.id)
+              }
             />
           </motion.article>
         </main>

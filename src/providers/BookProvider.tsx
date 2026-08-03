@@ -171,7 +171,8 @@ interface BookContextValue {
   hydrated: boolean;
   setTitle: (title: string) => void;
   setAuthor: (author: string) => void;
-  updateChapterContent: (content: string) => void;
+  /** Pass chapterId when flushing from an editor instance so chapter switches don't mis-attribute prose. */
+  updateChapterContent: (content: string, chapterId?: string) => void;
   updateChapterTitle: (chapterId: string, title: string) => void;
   updateChapterSummary: (chapterId: string, summary: string) => void;
   updateChapterNotes: (notes: string) => void;
@@ -387,7 +388,7 @@ interface BookContextValue {
   addDumpPage: (title?: string) => string;
   deleteDumpPage: (pageId: string) => void;
   updateDumpPageTitle: (pageId: string, title: string) => void;
-  updateDumpPageContent: (content: string) => void;
+  updateDumpPageContent: (content: string, pageId?: string) => void;
   reorderDumpPages: (fromIndex: number, toIndex: number) => void;
   addPlotThread: (partial?: Partial<Pick<PlotThread, "name" | "color">>) => string;
   updatePlotThread: (
@@ -959,24 +960,27 @@ export function BookProvider({ children }: { children: ReactNode }) {
       hydrated,
       setTitle: (title) => updateBook((b) => ({ ...b, title })),
       setAuthor: (author) => updateBook((b) => ({ ...b, author })),
-      updateChapterContent: (content) =>
-        updateBook((b) => ({
-          ...b,
-          chapters: b.chapters.map((c) => {
-            if (c.id !== b.activeChapterId) return c;
-            const heading = extractChapterHeading(content);
-            const title =
-              heading === null || heading === "" ? c.title : heading;
-            if (c.content === content && c.title === title) return c;
-            // Keep scene-card sync off the typing path — debounced separately.
-            return {
-              ...c,
-              content,
-              title,
-              updatedAt: Date.now(),
-            };
-          }),
-        })),
+      updateChapterContent: (content, chapterId) =>
+        updateBook((b) => {
+          const targetId = chapterId ?? b.activeChapterId;
+          return {
+            ...b,
+            chapters: b.chapters.map((c) => {
+              if (c.id !== targetId) return c;
+              const heading = extractChapterHeading(content);
+              const title =
+                heading === null || heading === "" ? c.title : heading;
+              if (c.content === content && c.title === title) return c;
+              // Keep scene-card sync off the typing path — debounced separately.
+              return {
+                ...c,
+                content,
+                title,
+                updatedAt: Date.now(),
+              };
+            }),
+          };
+        }),
       updateChapterTitle: (chapterId, title) =>
         updateBook((b) => ({
           ...b,
@@ -1299,7 +1303,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
           return { ...b, chapters };
         }),
       replaceManuscript: (parsed) => {
-        setBook(parsedToBook(parsed, book));
+        setBook((prev) => parsedToBook(parsed, prev));
       },
       addScene: (chapterId) => {
         const targetId = chapterId ?? book.activeChapterId;
@@ -2087,15 +2091,16 @@ export function BookProvider({ children }: { children: ReactNode }) {
             },
           };
         }),
-      updateDumpPageContent: (content) =>
+      updateDumpPageContent: (content, pageId) =>
         updateBook((b) => {
           const dump = b.dump ?? emptyDump();
+          const targetId = pageId ?? dump.activePageId;
           return {
             ...b,
             dump: {
               ...dump,
               pages: dump.pages.map((p) =>
-                p.id === dump.activePageId
+                p.id === targetId
                   ? { ...p, content, updatedAt: Date.now() }
                   : p,
               ),

@@ -222,8 +222,8 @@ export function MobileWriteApp() {
             content={activeContent}
             onChange={
               mode === "manuscript"
-                ? updateChapterContent
-                : updateDumpPageContent
+                ? (html) => updateChapterContent(html, activeId)
+                : (html) => updateDumpPageContent(html, activeId)
             }
             onEditorReady={onEditorReady}
             className="mobile-write-editor text-[1.05rem] leading-[1.75]"
