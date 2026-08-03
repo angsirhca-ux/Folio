@@ -17,6 +17,7 @@ import {
   removeSceneFromChapter,
   syncScenesFromManuscript,
 } from "./scenes";
+import { pruneCharacterFromFamilyTrees } from "./familyTrees";
 
 export function createTrashItem(
   partial: {
@@ -181,6 +182,10 @@ export function trashCharacterFromBook(
     ...book,
     trash: [item, ...(book.trash ?? [])],
     characters: (book.characters ?? []).filter((c) => c.id !== characterId),
+    familyTrees: pruneCharacterFromFamilyTrees(
+      book.familyTrees ?? [],
+      characterId,
+    ),
     updatedAt: Date.now(),
   };
 }
@@ -215,6 +220,26 @@ export function trashResearchFromBook(book: Book, entryId: string): Book {
     ...book,
     trash: [item, ...(book.trash ?? [])],
     research: (book.research ?? []).filter((e) => e.id !== entryId),
+    updatedAt: Date.now(),
+  };
+}
+
+export function trashEncyclopediaFromBook(book: Book, entryId: string): Book {
+  const entry = (book.encyclopedia ?? []).find((e) => e.id === entryId);
+  if (!entry) return book;
+  const item = createTrashItem({
+    kind: "encyclopedia",
+    title: entry.title || "Untitled",
+    subtitle:
+      entry.shortBio ||
+      (book.encyclopediaStacks ?? []).find((s) => s.id === entry.stackId)?.name ||
+      "Encyclopedia",
+    payload: { kind: "encyclopedia", entry: structuredClone(entry) },
+  });
+  return {
+    ...book,
+    trash: [item, ...(book.trash ?? [])],
+    encyclopedia: (book.encyclopedia ?? []).filter((e) => e.id !== entryId),
     updatedAt: Date.now(),
   };
 }
@@ -338,6 +363,18 @@ export function restoreTrashItem(book: Book, itemId: string): Book {
       return {
         ...book,
         research: exists ? book.research : [...(book.research ?? []), entry],
+        trash: (book.trash ?? []).filter((t) => t.id !== itemId),
+        updatedAt: Date.now(),
+      };
+    }
+    case "encyclopedia": {
+      const entry = item.payload.entry;
+      const exists = (book.encyclopedia ?? []).some((e) => e.id === entry.id);
+      return {
+        ...book,
+        encyclopedia: exists
+          ? book.encyclopedia
+          : [...(book.encyclopedia ?? []), entry],
         trash: (book.trash ?? []).filter((t) => t.id !== itemId),
         updatedAt: Date.now(),
       };

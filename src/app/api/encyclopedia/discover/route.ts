@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import {
-  DISCOVER_RESEARCH_TOOL,
-  buildResearchDiscoveryContext,
-  discoverResearchTool,
-  type DiscoveredResearch,
-} from "@/lib/researchEnrichment";
+  DISCOVER_ENCYCLOPEDIA_TOOL,
+  buildEncyclopediaDiscoveryContext,
+  discoverEncyclopediaTool,
+  type DiscoveredEncyclopedia,
+} from "@/lib/encyclopediaEnrichment";
 import {
   anthropicModel,
   extractToolInput,
@@ -16,7 +16,7 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 type DiscoverBody = {
-  book: Pick<Book, "title" | "chapters" | "research">;
+  book: Pick<Book, "title" | "chapters" | "encyclopedia" | "encyclopediaStacks">;
 };
 
 export async function POST(request: Request) {
@@ -39,10 +39,10 @@ export async function POST(request: Request) {
   }
 
   const chapterCount = body.book.chapters?.length ?? 0;
-  const context = buildResearchDiscoveryContext(body.book);
+  const context = buildEncyclopediaDiscoveryContext(body.book);
   if (context.length < 120) {
     return NextResponse.json(
-      { error: "Manuscript is too short to discover research topics." },
+      { error: "Manuscript is too short to discover encyclopedia articles." },
       { status: 422 },
     );
   }
@@ -51,22 +51,22 @@ export async function POST(request: Request) {
     const message = await client.messages.create({
       model: anthropicModel(),
       max_tokens: 4096,
-      tools: [discoverResearchTool],
-      tool_choice: { type: "tool", name: DISCOVER_RESEARCH_TOOL },
-      system: `You find outside research topics for a novelist: period facts, craft questions, themes, motifs, and sources to chase.
-Skip in-world lore (magic systems, creatures, customs) — that belongs in Encyclopedia.
-Scan EVERY chapter. Skip topics already listed. Do not invent plot facts — name what the text actually circles.`,
+      tools: [discoverEncyclopediaTool],
+      tool_choice: { type: "tool", name: DISCOVER_ENCYCLOPEDIA_TOOL },
+      system: `You find in-world encyclopedia articles for a novelist's story bible.
+Stack names should fit THIS book (not fantasy defaults) — reuse Existing stacks when they fit, or suggest a short plain stackName.
+Scan EVERY chapter. Skip topics already listed. Skip literary themes/motifs (those belong in Research). Do not invent plot facts — name what the text actually establishes about the world.`,
       messages: [
         {
           role: "user",
-          content: `Discover missing research topics across all ${chapterCount} chapters.\n\n${context}`,
+          content: `Discover missing encyclopedia articles across all ${chapterCount} chapters.\n\n${context}`,
         },
       ],
     });
 
-    const result = extractToolInput<{ entries: DiscoveredResearch[] }>(
+    const result = extractToolInput<{ entries: DiscoveredEncyclopedia[] }>(
       message,
-      DISCOVER_RESEARCH_TOOL,
+      DISCOVER_ENCYCLOPEDIA_TOOL,
     );
     const entries = (result?.entries ?? [])
       .map((e) => ({

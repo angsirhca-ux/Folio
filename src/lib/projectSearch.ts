@@ -7,7 +7,8 @@ export type ProjectSearchKind =
   | "prose"
   | "character"
   | "location"
-  | "research";
+  | "research"
+  | "encyclopedia";
 
 export type ProjectSearchHit = {
   /** Stable list key */
@@ -30,6 +31,7 @@ const KIND_ORDER: ProjectSearchKind[] = [
   "prose",
   "character",
   "location",
+  "encyclopedia",
   "research",
 ];
 
@@ -39,6 +41,7 @@ export const PROJECT_SEARCH_KIND_LABEL: Record<ProjectSearchKind, string> = {
   prose: "Manuscript",
   character: "Characters",
   location: "Places",
+  encyclopedia: "Encyclopedia",
   research: "Research",
 };
 
@@ -282,6 +285,35 @@ export function searchBook(
       score,
       entityId: entry.id,
       href: `/research/${entry.id}`,
+    });
+  }
+
+  for (const entry of book.encyclopedia ?? []) {
+    const score =
+      scoreField(entry.title, q, 14) +
+      scoreList(entry.aliases, q, 8) +
+      scoreField(entry.shortBio, q, 5) +
+      scoreField(entry.summary, q, 5) +
+      scoreField(entry.wiki, q, 3) +
+      scoreField(entry.storyDigest, q, 2) +
+      scoreList(entry.tags, q, 3);
+    if (score <= 0) continue;
+    hits.push({
+      id: `encyclopedia:${entry.id}`,
+      kind: "encyclopedia",
+      title: entry.title?.trim() || "Untitled",
+      subtitle:
+        entry.shortBio?.trim() ||
+        (book.encyclopediaStacks ?? []).find((s) => s.id === entry.stackId)
+          ?.name ||
+        "Encyclopedia",
+      excerpt: snippetAround(
+        [entry.summary, entry.wiki].filter(Boolean).join("\n"),
+        q,
+      ),
+      score,
+      entityId: entry.id,
+      href: `/encyclopedia/${entry.id}`,
     });
   }
 

@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { AppSettings, Book, Chapter, Character, DevelopmentalMemoryNote, DevelopmentalPass, DumpPage, Location, PlotThread, ResearchEntry, StoryMap, StoryMapPin, StoryMapRegion, ThemeId, TrashedBook, BetaMemoryNote, BetaReview } from "@/lib/types";
+import type { AppSettings, Book, Chapter, Character, DevelopmentalMemoryNote, DevelopmentalPass, DumpPage, EncyclopediaEntry, EncyclopediaStack, FamilyTree, Location, PlotThread, ResearchEntry, StoryMap, StoryMapPin, StoryMapRegion, ThemeId, TrashedBook, BetaMemoryNote, BetaReview } from "@/lib/types";
 import {
   createId,
   createBookInLibrary,
@@ -123,11 +123,25 @@ import {
   syncResearchFromManuscript,
 } from "@/lib/research";
 import {
+  createFamilyTree,
+  sortFamilyTrees,
+} from "@/lib/familyTrees";
+import {
+  createEncyclopediaEntry,
+  createEncyclopediaLink,
+  createEncyclopediaStack,
+  ensureEncyclopediaStackNamed,
+  findEncyclopediaByTitle,
+  sortEncyclopediaStacks,
+  syncEncyclopediaFromManuscript,
+} from "@/lib/encyclopedia";
+import {
   emptyBookTrash,
   purgeTrashItem,
   restoreTrashItem,
   trashChapterFromBook,
   trashCharacterFromBook,
+  trashEncyclopediaFromBook,
   trashLocationFromBook,
   trashResearchFromBook,
   trashSceneFromBook,
@@ -274,6 +288,12 @@ interface BookContextValue {
     characterId: string,
     relationshipId: string,
   ) => void;
+  addFamilyTree: (name?: string) => string;
+  updateFamilyTree: (
+    treeId: string,
+    partial: Partial<Omit<FamilyTree, "id" | "createdAt">>,
+  ) => void;
+  deleteFamilyTree: (treeId: string) => void;
   addLocation: (partial?: Partial<Location> & { name?: string }) => string;
   upsertLocations: (incoming: Location[]) => void;
   updateLocation: (
@@ -362,6 +382,43 @@ interface BookContextValue {
     }>,
   ) => void;
   removeResearchLink: (entryId: string, linkId: string) => void;
+  addEncyclopedia: (
+    partial?: Partial<EncyclopediaEntry> & { title?: string; stackId?: string },
+  ) => string;
+  upsertEncyclopedia: (incoming: EncyclopediaEntry[]) => void;
+  updateEncyclopedia: (
+    entryId: string,
+    partial: Partial<Omit<EncyclopediaEntry, "id" | "createdAt">>,
+  ) => void;
+  replaceEncyclopedia: (entry: EncyclopediaEntry) => void;
+  deleteEncyclopedia: (entryId: string) => void;
+  addEncyclopediaStack: (name: string, color?: string) => string;
+  updateEncyclopediaStack: (
+    stackId: string,
+    partial: Partial<Pick<EncyclopediaStack, "name" | "color">>,
+  ) => void;
+  deleteEncyclopediaStack: (stackId: string) => void;
+  ensureEncyclopediaStack: (name: string) => string;
+  addEncyclopediaLink: (
+    entryId: string,
+    partial: {
+      label: string;
+      toEntryId?: string;
+      toTitle?: string;
+      notes?: string;
+    },
+  ) => void;
+  updateEncyclopediaLink: (
+    entryId: string,
+    linkId: string,
+    partial: Partial<{
+      label: string;
+      toEntryId: string;
+      toTitle: string;
+      notes: string;
+    }>,
+  ) => void;
+  removeEncyclopediaLink: (entryId: string, linkId: string) => void;
   /** Apply a developmental-editor pass (flags + memory). Never rewrites prose. */
   applyDevelopmentalReview: (
     pass: DevelopmentalPass,
@@ -553,7 +610,8 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (!current) return;
       const withChars = syncCharactersFromManuscript(current);
       const withLocs = syncLocationsFromManuscript(withChars);
-      const synced = syncResearchFromManuscript(withLocs);
+      const withResearch = syncResearchFromManuscript(withLocs);
+      const synced = syncEncyclopediaFromManuscript(withResearch);
       if (synced === current) return;
       skipDirtyRef.current = true;
       setBook(synced);
@@ -1615,6 +1673,44 @@ export function BookProvider({ children }: { children: ReactNode }) {
             };
           }),
         })),
+      addFamilyTree: (name) => {
+        let id = "";
+        updateBook((b) => {
+          const trees = b.familyTrees ?? [];
+          const tree = createFamilyTree(
+            { name: name?.trim() || "Family tree" },
+            trees.length,
+          );
+          id = tree.id;
+          return {
+            ...b,
+            familyTrees: sortFamilyTrees([...trees, tree]),
+          };
+        });
+        return id;
+      },
+      updateFamilyTree: (treeId, partial) =>
+        updateBook((b) => ({
+          ...b,
+          familyTrees: sortFamilyTrees(
+            (b.familyTrees ?? []).map((t) =>
+              t.id === treeId
+                ? {
+                    ...t,
+                    ...partial,
+                    id: t.id,
+                    createdAt: t.createdAt,
+                    updatedAt: Date.now(),
+                  }
+                : t,
+            ),
+          ),
+        })),
+      deleteFamilyTree: (treeId) =>
+        updateBook((b) => ({
+          ...b,
+          familyTrees: (b.familyTrees ?? []).filter((t) => t.id !== treeId),
+        })),
       addLocation: (partial) => {
         const location = createLocation({
           ...partial,
@@ -1973,6 +2069,225 @@ export function BookProvider({ children }: { children: ReactNode }) {
         updateBook((b) => ({
           ...b,
           research: (b.research ?? []).map((e) => {
+            if (e.id !== entryId) return e;
+            return {
+              ...e,
+              links: e.links.filter((l) => l.id !== linkId),
+              updatedAt: Date.now(),
+            };
+          }),
+        })),
+      addEncyclopedia: (partial) => {
+        let createdId = "";
+        updateBook((b) => {
+          let stacks = [...(b.encyclopediaStacks ?? [])];
+          let stackId = partial?.stackId ?? "";
+          if (!stackId || !stacks.some((s) => s.id === stackId)) {
+            const ensured = ensureEncyclopediaStackNamed(
+              stacks,
+              stacks[0]?.name ?? "General",
+            );
+            stacks = ensured.stacks;
+            stackId = ensured.stack.id;
+          }
+          const entry = createEncyclopediaEntry({
+            ...partial,
+            stackId,
+            title: partial?.title?.trim() || "New article",
+          });
+          createdId = entry.id;
+          return {
+            ...b,
+            encyclopediaStacks: sortEncyclopediaStacks(stacks),
+            encyclopedia: [...(b.encyclopedia ?? []), entry],
+          };
+        });
+        return createdId;
+      },
+      upsertEncyclopedia: (incoming) => {
+        updateBook((b) => {
+          const encyclopedia = [...(b.encyclopedia ?? [])];
+          for (const item of incoming) {
+            const existing =
+              encyclopedia.find((e) => e.id === item.id) ??
+              findEncyclopediaByTitle(encyclopedia, item.title);
+            if (existing) {
+              const idx = encyclopedia.findIndex((e) => e.id === existing.id);
+              encyclopedia[idx] = {
+                ...existing,
+                ...item,
+                id: existing.id,
+                createdAt: existing.createdAt,
+                updatedAt: Date.now(),
+              };
+            } else {
+              encyclopedia.push(item);
+            }
+          }
+          return { ...b, encyclopedia };
+        });
+      },
+      updateEncyclopedia: (entryId, partial) =>
+        updateBook((b) => ({
+          ...b,
+          encyclopedia: (b.encyclopedia ?? []).map((e) =>
+            e.id === entryId
+              ? { ...e, ...partial, id: e.id, createdAt: e.createdAt, updatedAt: Date.now() }
+              : e,
+          ),
+        })),
+      replaceEncyclopedia: (entry) =>
+        updateBook((b) => {
+          const list = b.encyclopedia ?? [];
+          const exists = list.some((e) => e.id === entry.id);
+          if (!exists) {
+            return {
+              ...b,
+              encyclopedia: [...list, { ...entry, updatedAt: Date.now() }],
+            };
+          }
+          return {
+            ...b,
+            encyclopedia: list.map((e) =>
+              e.id === entry.id ? { ...entry, updatedAt: Date.now() } : e,
+            ),
+          };
+        }),
+      deleteEncyclopedia: (entryId) =>
+        updateBook((b) => trashEncyclopediaFromBook(b, entryId)),
+      addEncyclopediaStack: (name, color) => {
+        let id = "";
+        updateBook((b) => {
+          const stacks = [...(b.encyclopediaStacks ?? [])];
+          const existing = stacks.find(
+            (s) => s.name.trim().toLowerCase() === name.trim().toLowerCase(),
+          );
+          if (existing) {
+            id = existing.id;
+            if (color && color !== existing.color) {
+              return {
+                ...b,
+                encyclopediaStacks: sortEncyclopediaStacks(
+                  stacks.map((s) =>
+                    s.id === existing.id
+                      ? { ...s, color, updatedAt: Date.now() }
+                      : s,
+                  ),
+                ),
+              };
+            }
+            return b;
+          }
+          const stack = createEncyclopediaStack(
+            { name, color, order: stacks.length },
+            stacks,
+          );
+          id = stack.id;
+          return {
+            ...b,
+            encyclopediaStacks: sortEncyclopediaStacks([...stacks, stack]),
+          };
+        });
+        return id;
+      },
+      updateEncyclopediaStack: (stackId, partial) =>
+        updateBook((b) => ({
+          ...b,
+          encyclopediaStacks: sortEncyclopediaStacks(
+            (b.encyclopediaStacks ?? []).map((s) =>
+              s.id === stackId
+                ? {
+                    ...s,
+                    ...(partial.name != null
+                      ? { name: partial.name.trim() || s.name }
+                      : {}),
+                    ...(partial.color != null
+                      ? { color: partial.color.trim() || s.color }
+                      : {}),
+                    updatedAt: Date.now(),
+                  }
+                : s,
+            ),
+          ),
+        })),
+      deleteEncyclopediaStack: (stackId) =>
+        updateBook((b) => {
+          const remaining = (b.encyclopediaStacks ?? []).filter(
+            (s) => s.id !== stackId,
+          );
+          let stacks = remaining;
+          let fallbackId = remaining[0]?.id;
+          if (!fallbackId) {
+            const ensured = ensureEncyclopediaStackNamed([], "General");
+            stacks = ensured.stacks;
+            fallbackId = ensured.stack.id;
+          }
+          return {
+            ...b,
+            encyclopediaStacks: sortEncyclopediaStacks(stacks),
+            encyclopedia: (b.encyclopedia ?? []).map((e) =>
+              e.stackId === stackId
+                ? { ...e, stackId: fallbackId!, updatedAt: Date.now() }
+                : e,
+            ),
+          };
+        }),
+      ensureEncyclopediaStack: (name) => {
+        let id = "";
+        updateBook((b) => {
+          const ensured = ensureEncyclopediaStackNamed(
+            b.encyclopediaStacks ?? [],
+            name,
+          );
+          id = ensured.stack.id;
+          if (ensured.stacks === (b.encyclopediaStacks ?? [])) {
+            return b;
+          }
+          return {
+            ...b,
+            encyclopediaStacks: sortEncyclopediaStacks(ensured.stacks),
+          };
+        });
+        return id;
+      },
+      addEncyclopediaLink: (entryId, partial) =>
+        updateBook((b) => ({
+          ...b,
+          encyclopedia: (b.encyclopedia ?? []).map((e) => {
+            if (e.id !== entryId) return e;
+            return {
+              ...e,
+              links: [
+                ...e.links,
+                createEncyclopediaLink({
+                  label: partial.label,
+                  toEntryId: partial.toEntryId,
+                  toTitle: partial.toTitle,
+                  notes: partial.notes,
+                }),
+              ],
+              updatedAt: Date.now(),
+            };
+          }),
+        })),
+      updateEncyclopediaLink: (entryId, linkId, partial) =>
+        updateBook((b) => ({
+          ...b,
+          encyclopedia: (b.encyclopedia ?? []).map((e) => {
+            if (e.id !== entryId) return e;
+            return {
+              ...e,
+              links: e.links.map((l) =>
+                l.id === linkId ? { ...l, ...partial } : l,
+              ),
+              updatedAt: Date.now(),
+            };
+          }),
+        })),
+      removeEncyclopediaLink: (entryId, linkId) =>
+        updateBook((b) => ({
+          ...b,
+          encyclopedia: (b.encyclopedia ?? []).map((e) => {
             if (e.id !== entryId) return e;
             return {
               ...e,

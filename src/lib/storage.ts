@@ -16,6 +16,9 @@ import {
   ensureBookCharacters,
 } from "./characters";
 import {
+  ensureBookFamilyTrees,
+} from "./familyTrees";
+import {
   createLocation,
   createLocationConnection,
   ensureBookLocations,
@@ -25,6 +28,12 @@ import {
   createResearchSource,
   ensureBookResearch,
 } from "./research";
+import {
+  ensureBookEncyclopedia,
+  syncEncyclopediaFromManuscript,
+  createEncyclopediaEntry,
+  createEncyclopediaStack,
+} from "./encyclopedia";
 import {
   bookSceneCount,
   bookWordCount,
@@ -70,8 +79,11 @@ export function createEmptyBook(): Book {
     createdAt: now,
     updatedAt: now,
     characters: [],
+    familyTrees: [],
     locations: [],
     research: [],
+    encyclopedia: [],
+    encyclopediaStacks: [],
     trash: [],
     map,
     maps: [map],
@@ -314,6 +326,22 @@ export function createSampleBook(): Book {
     tags: [],
   });
 
+  const customsStack = createEncyclopediaStack({
+    name: "Customs",
+    order: 0,
+  });
+
+  const duskCustom = createEncyclopediaEntry({
+    title: "Leaving before dusk",
+    stackId: customsStack.id,
+    shortBio: "In this town, serious conversations end before the light fails.",
+    wiki: "A local custom more felt than spoken: if you stay past dusk, you owe an answer. Elena keeps leaving.",
+    summary: "Social rule that shapes exits and unfinished talk.",
+    linkedCharacters: ["Elena"],
+    linkedLocations: ["Street"],
+    tags: ["sample"],
+  });
+
   return {
     id: createId(),
     title: "Untitled Manuscript",
@@ -322,8 +350,11 @@ export function createSampleBook(): Book {
     createdAt: now,
     updatedAt: now,
     characters: [elena, marcus],
+    familyTrees: [],
     locations: [studyLoc, gardenLoc, streetLoc, townLoc, riverbankLoc],
     research: [lettersTopic, houseTopic, duskTopic],
+    encyclopedia: [duskCustom],
+    encyclopediaStacks: [customsStack],
     trash: [],
     map: sampleMapForLocations([
       studyLoc,
@@ -371,6 +402,7 @@ function hydrateBook(
     | "characters"
     | "locations"
     | "research"
+    | "encyclopedia"
     | "trash"
     | "developmentalEditor"
     | "betaReaders"
@@ -384,6 +416,7 @@ function hydrateBook(
     characters?: Book["characters"];
     locations?: Book["locations"];
     research?: Book["research"];
+    encyclopedia?: Book["encyclopedia"];
     trash?: Book["trash"];
     developmentalEditor?: Book["developmentalEditor"];
     betaReaders?: Book["betaReaders"];
@@ -403,26 +436,36 @@ function hydrateBook(
           ensureBookMap(
             ensureDevelopmentalEditor(
               ensureBookTrash(
-                ensureBookResearch(
-                  ensureBookLocations(
-                    ensureBookCharacters({
-                      ...book,
-                      seriesId: book.seriesId ?? null,
-                      plotThreads: book.plotThreads ?? [],
-                      map: book.map ?? emptyStoryMap(),
-                      maps: book.maps,
-                      activeMapId: book.activeMapId,
-                      chapters: book.chapters.map((c) =>
-                        withScenes(
-                          syncChapterTitleField({
-                            ...c,
-                            summary: c.summary ?? "",
-                            notes: c.notes ?? "",
-                            scenes: c.scenes ?? [],
-                          }),
+                syncEncyclopediaFromManuscript(
+                  ensureBookResearch(
+                    ensureBookEncyclopedia(
+                      ensureBookFamilyTrees(
+                        ensureBookLocations(
+                          ensureBookCharacters({
+                            ...book,
+                            seriesId: book.seriesId ?? null,
+                            plotThreads: book.plotThreads ?? [],
+                            map: book.map ?? emptyStoryMap(),
+                            maps: book.maps,
+                            activeMapId: book.activeMapId,
+                            encyclopedia: book.encyclopedia ?? [],
+                            encyclopediaStacks: book.encyclopediaStacks ?? [],
+                            familyTrees: book.familyTrees ?? [],
+                            research: book.research ?? [],
+                            chapters: book.chapters.map((c) =>
+                              withScenes(
+                                syncChapterTitleField({
+                                  ...c,
+                                  summary: c.summary ?? "",
+                                  notes: c.notes ?? "",
+                                  scenes: c.scenes ?? [],
+                                }),
+                              ),
+                            ),
+                          } as Book),
                         ),
                       ),
-                    } as Book),
+                    ),
                   ),
                 ),
               ),

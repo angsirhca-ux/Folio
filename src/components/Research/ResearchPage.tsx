@@ -35,14 +35,13 @@ type SortMode = "story" | "title" | "depth" | "kind";
 const DEPTH_RANK = { stub: 0, sketch: 1, portrait: 2, living: 3 } as const;
 
 const KIND_ORDER: Record<ResearchKind, number> = {
-  theme: 0,
-  motif: 1,
-  period: 2,
-  craft: 3,
-  source: 4,
-  lore: 5,
-  question: 6,
-  unspecified: 7,
+  source: 0,
+  period: 1,
+  craft: 2,
+  theme: 3,
+  motif: 4,
+  question: 5,
+  unspecified: 6,
 };
 
 export function ResearchPage() {
@@ -201,21 +200,22 @@ export function ResearchPage() {
     <div className="mx-auto max-w-3xl px-5 pb-24 pt-10 sm:px-8 lg:px-10">
       <header className="mb-10">
         <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.28em] text-[var(--ink-faint)]">
-          Commonplace book
+          Outside sources
         </p>
         <h1 className="mt-3 font-[family-name:var(--font-display)] text-4xl font-medium tracking-tight text-[var(--ink)] sm:text-5xl">
           Research
         </h1>
         <p className="mt-4 max-w-xl font-[family-name:var(--font-ui)] text-base leading-relaxed text-[var(--ink-muted)]">
-          Themes, motifs, and open questions gather here as the manuscript
-          speaks. Use Claude to deepen empty fields — summary, sources, links —
-          without overwriting what you&apos;ve written by hand.
+          Outside sources and reference — articles, period facts, craft notes,
+          and open questions. Story-world canon lives in Encyclopedia. Claude
+          fills empty fields without overwriting what you&apos;ve written by
+          hand.
         </p>
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <ClaudeDeepenButton
             configured={claude?.configured ?? null}
             busy={dossierBusy}
-            label="Deepen commonplace with Claude"
+            label="Deepen research with Claude"
             onClick={() => void runDeepenDossier()}
           />
           {dossierMessage ? (

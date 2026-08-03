@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import {
-  ENRICH_RESEARCH_TOOL,
-  buildResearchManuscriptContext,
-  enrichResearchTool,
-  researchSnapshotForPrompt,
-  type ResearchEnrichmentPayload,
-} from "@/lib/researchEnrichment";
+  ENRICH_ENCYCLOPEDIA_TOOL,
+  buildEncyclopediaManuscriptContext,
+  enrichEncyclopediaTool,
+  encyclopediaSnapshotForPrompt,
+  type EncyclopediaEnrichmentPayload,
+} from "@/lib/encyclopediaEnrichment";
 import {
   anthropicModel,
   extractToolInput,
   getAnthropicClient,
 } from "@/lib/anthropic";
-import type { Book, ResearchEntry } from "@/lib/types";
+import type { Book, EncyclopediaEntry } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -27,7 +27,12 @@ export async function GET() {
 type EnrichBody = {
   book: Pick<
     Book,
-    "title" | "chapters" | "research" | "characters" | "locations"
+    | "title"
+    | "chapters"
+    | "encyclopedia"
+    | "encyclopediaStacks"
+    | "characters"
+    | "locations"
   >;
   entryId: string;
 };
@@ -51,18 +56,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const entry = (body.book?.research ?? []).find(
-    (e: ResearchEntry) => e.id === body.entryId,
+  const entry = (body.book?.encyclopedia ?? []).find(
+    (e: EncyclopediaEntry) => e.id === body.entryId,
   );
   if (!entry) {
     return NextResponse.json(
-      { error: "Research entry not found in payload." },
+      { error: "Encyclopedia entry not found in payload." },
       { status: 400 },
     );
   }
 
   const chapterCount = body.book.chapters?.length ?? 0;
-  const context = buildResearchManuscriptContext(body.book, entry);
+  const context = buildEncyclopediaManuscriptContext(body.book, entry);
   if (context.length < 80) {
     return NextResponse.json(
       {
@@ -77,21 +82,20 @@ export async function POST(request: Request) {
     const message = await client.messages.create({
       model: anthropicModel(),
       max_tokens: 8192,
-      tools: [enrichResearchTool],
-      tool_choice: { type: "tool", name: ENRICH_RESEARCH_TOOL },
-      system: `You are a literary research editor for a novelist's outside-source commonplace book.
+      tools: [enrichEncyclopediaTool],
+      tool_choice: { type: "tool", name: ENRICH_ENCYCLOPEDIA_TOOL },
+      system: `You are a literary world-bible editor for a novelist's encyclopedia.
 The manuscript has ${chapterCount} chapter(s). Use evidence from EVERY chapter.
-Prefer real-world sources, citations, period facts, and craft questions — not in-world magic/creatures/customs (those belong in Encyclopedia).
-Ground claims in the text. Do not invent sources that are not on the page unless clearly labeled as open questions.
-Write in a spare, novelistic register — no academic jargon, no marketing tone.
-Prefer the author's language when quoting.`,
+Capture IN-WORLD canon only. Suggest stackName that fits this book (reuse Existing stacks when possible).
+Do not invent real-world sources or citations — that belongs in Research, not Encyclopedia.
+Ground claims in the text. Write in a spare, novelistic register.`,
       messages: [
         {
           role: "user",
-          content: `Enrich this research entry using the FULL manuscript (${chapterCount} chapters).
+          content: `Enrich this encyclopedia article using the FULL manuscript (${chapterCount} chapters).
 
 Current snapshot:
-${researchSnapshotForPrompt(entry)}
+${encyclopediaSnapshotForPrompt(entry)}
 
 Manuscript evidence:
 ${context}`,
@@ -99,13 +103,13 @@ ${context}`,
       ],
     });
 
-    const enrichment = extractToolInput<ResearchEnrichmentPayload>(
+    const enrichment = extractToolInput<EncyclopediaEnrichmentPayload>(
       message,
-      ENRICH_RESEARCH_TOOL,
+      ENRICH_ENCYCLOPEDIA_TOOL,
     );
     if (!enrichment) {
       return NextResponse.json(
-        { error: "Claude returned no structured research payload." },
+        { error: "Claude returned no structured encyclopedia payload." },
         { status: 502 },
       );
     }

@@ -10,6 +10,7 @@ import {
   Minimize2,
   StickyNote,
   ScrollText,
+  BookMarked,
   Sparkles,
   Tags,
   Users,
@@ -25,6 +26,7 @@ import { FocusModeIndicator } from "@/components/FocusMode/FocusMode";
 import { ImportDialog } from "@/components/Import/ImportDialog";
 import { NotesPanel } from "@/components/Notes/NotesPanel";
 import { GoalsPanel } from "@/components/Goals/GoalsPanel";
+import { EncyclopediaPanel } from "@/components/Encyclopedia/EncyclopediaPanel";
 import { ResearchPanel } from "@/components/Research/ResearchPanel";
 import { SceneInspector } from "@/components/SceneInspector/SceneInspector";
 import { SettingsDialog } from "@/components/Settings/SettingsDialog";
@@ -62,6 +64,10 @@ export function WritingApp() {
   const [inspectorSceneId, setInspectorSceneId] = useState<string | null>(null);
   const [researchOpen, setResearchOpen] = useState(false);
   const [researchEntryId, setResearchEntryId] = useState<string | null>(null);
+  const [encyclopediaOpen, setEncyclopediaOpen] = useState(false);
+  const [encyclopediaEntryId, setEncyclopediaEntryId] = useState<string | null>(
+    null,
+  );
   const [activeReviewFlagId, setActiveReviewFlagId] = useState<string | null>(
     null,
   );
@@ -93,6 +99,7 @@ export function WritingApp() {
     setEditorOpen(false);
     setBetaOpen(false);
     setResearchOpen(false);
+    setEncyclopediaOpen(false);
     setInspectorSceneId(resolveInspectorSceneId());
     setInspectorOpen(true);
   }
@@ -103,7 +110,18 @@ export function WritingApp() {
     setEditorOpen(false);
     setBetaOpen(false);
     setInspectorOpen(false);
+    setEncyclopediaOpen(false);
     setResearchOpen(true);
+  }
+
+  function openEncyclopedia() {
+    setNotesOpen(false);
+    setGoalsOpen(false);
+    setEditorOpen(false);
+    setBetaOpen(false);
+    setInspectorOpen(false);
+    setResearchOpen(false);
+    setEncyclopediaOpen(true);
   }
 
   const handlers = useMemo(
@@ -119,6 +137,7 @@ export function WritingApp() {
         setInspectorOpen(false);
         setGoalsOpen(false);
         setResearchOpen(false);
+        setEncyclopediaOpen(false);
         setNotesOpen((v) => !v);
       },
       onToggleGoals: () => {
@@ -127,6 +146,7 @@ export function WritingApp() {
         setInspectorOpen(false);
         setNotesOpen(false);
         setResearchOpen(false);
+        setEncyclopediaOpen(false);
         setGoalsOpen((v) => !v);
       },
       onToggleInspector: () => {
@@ -143,6 +163,13 @@ export function WritingApp() {
         }
         openResearch();
       },
+      onToggleEncyclopedia: () => {
+        if (encyclopediaOpen) {
+          setEncyclopediaOpen(false);
+          return;
+        }
+        openEncyclopedia();
+      },
       onOpenExport: () => setExportOpen(true),
       onOpenImport: () => setImportOpen(true),
       onSave: saveNow,
@@ -157,6 +184,7 @@ export function WritingApp() {
       selectAdjacentChapter,
       inspectorOpen,
       researchOpen,
+      encyclopediaOpen,
       activeChapter,
       sceneFocus,
       inspectorSceneId,
@@ -267,6 +295,7 @@ export function WritingApp() {
             setBetaOpen(false);
             setInspectorOpen(false);
             setResearchOpen(false);
+            setEncyclopediaOpen(false);
             setGoalsOpen(false);
             setNotesOpen(true);
           }}
@@ -278,7 +307,7 @@ export function WritingApp() {
           variant="ghost"
           size="icon-sm"
           aria-label="Research beside manuscript"
-          title="Research — open beside the draft (⌘⌥R)"
+          title="Research — outside sources beside the draft (⌘⌥R)"
           onClick={() => {
             if (researchOpen) {
               setResearchOpen(false);
@@ -289,6 +318,22 @@ export function WritingApp() {
           className={researchOpen ? "text-[var(--accent)]" : ""}
         >
           <ScrollText className="h-4 w-4" strokeWidth={1.5} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Encyclopedia beside manuscript"
+          title="Encyclopedia — in-world canon beside the draft (⌘⌥E)"
+          onClick={() => {
+            if (encyclopediaOpen) {
+              setEncyclopediaOpen(false);
+              return;
+            }
+            openEncyclopedia();
+          }}
+          className={encyclopediaOpen ? "text-[var(--accent)]" : ""}
+        >
+          <BookMarked className="h-4 w-4" strokeWidth={1.5} />
         </Button>
         <Button
           variant="ghost"
@@ -314,6 +359,7 @@ export function WritingApp() {
             setNotesOpen(false);
             setInspectorOpen(false);
             setResearchOpen(false);
+            setEncyclopediaOpen(false);
             setGoalsOpen(false);
             setBetaOpen(false);
             setEditorOpen(true);
@@ -331,6 +377,7 @@ export function WritingApp() {
             setNotesOpen(false);
             setInspectorOpen(false);
             setResearchOpen(false);
+            setEncyclopediaOpen(false);
             setGoalsOpen(false);
             setEditorOpen(false);
             setActiveReviewFlagId(null);
@@ -380,7 +427,7 @@ export function WritingApp() {
         data-folio-scroll
         className={cn(
           "folio-scroll relative z-10 h-screen overflow-y-auto transition-[padding] duration-400 ease-[cubic-bezier(0.25,0.1,0.25,1)]",
-          editorOpen || betaOpen || inspectorOpen || researchOpen
+          editorOpen || betaOpen || inspectorOpen || researchOpen || encyclopediaOpen
             ? "lg:pr-[26rem]"
             : "",
         )}
@@ -424,6 +471,7 @@ export function WritingApp() {
         setBetaOpen(false);
         setInspectorOpen(false);
         setResearchOpen(false);
+        setEncyclopediaOpen(false);
         setGoalsOpen(true);
       }} />
       <NotesPanel open={notesOpen} onClose={() => setNotesOpen(false)} />
@@ -433,6 +481,12 @@ export function WritingApp() {
         onClose={() => setResearchOpen(false)}
         entryId={researchEntryId}
         onEntryIdChange={setResearchEntryId}
+      />
+      <EncyclopediaPanel
+        open={encyclopediaOpen}
+        onClose={() => setEncyclopediaOpen(false)}
+        entryId={encyclopediaEntryId}
+        onEntryIdChange={setEncyclopediaEntryId}
       />
       <SceneInspector
         open={inspectorOpen}

@@ -36,14 +36,32 @@ export function createResearchLink(
 }
 
 export function createResearchEntry(
-  partial: Partial<ResearchEntry> & { title: string },
+  partial: Partial<Omit<ResearchEntry, "kind">> & {
+    title: string;
+    kind?: string;
+  },
 ): ResearchEntry {
   const now = Date.now();
+  const rawKind = (partial as { kind?: string }).kind ?? "unspecified";
+  const kind: ResearchKind =
+    rawKind === "lore"
+      ? "unspecified"
+      : (([
+          "theme",
+          "motif",
+          "period",
+          "craft",
+          "source",
+          "question",
+          "unspecified",
+        ].includes(rawKind)
+          ? rawKind
+          : "unspecified") as ResearchKind);
   return {
     id: partial.id ?? createId(),
     title: partial.title.trim() || "Untitled",
     aliases: partial.aliases ?? [],
-    kind: partial.kind ?? "unspecified",
+    kind,
     shortBio: partial.shortBio ?? "",
     wiki: partial.wiki ?? "",
     summary: partial.summary ?? "",
@@ -217,7 +235,8 @@ function inferKindFromTitle(title: string): ResearchKind {
   if (/motif|image|symbol|letter|light|dusk|mist|house/.test(t)) return "motif";
   if (/how to|craft|voice|structure|pov/.test(t)) return "craft";
   if (/who|why|what|how\?|\?/.test(t)) return "question";
-  if (/lore|history|world/.test(t)) return "lore";
+  if (/source|article|book|citation|history|period|victorian|century/.test(t))
+    return "source";
   return "motif";
 }
 
@@ -320,6 +339,7 @@ export function ensureBookResearch(
     "research" | "trash" | "developmentalEditor" | "betaReaders" | "dump"
   > & {
     research?: ResearchEntry[];
+    encyclopedia?: Book["encyclopedia"];
     trash?: Book["trash"];
     developmentalEditor?: Book["developmentalEditor"];
     betaReaders?: Book["betaReaders"];
@@ -329,6 +349,7 @@ export function ensureBookResearch(
   const raw = book.research ?? [];
   const normalized: Book = {
     ...book,
+    encyclopedia: book.encyclopedia ?? [],
     trash: book.trash ?? [],
     developmentalEditor: book.developmentalEditor ?? {
       memory: [],
@@ -397,12 +418,11 @@ export const RESEARCH_KIND_OPTIONS: {
   value: ResearchKind;
   label: string;
 }[] = [
-  { value: "theme", label: "Theme" },
-  { value: "motif", label: "Motif" },
+  { value: "source", label: "Source" },
   { value: "period", label: "Period" },
   { value: "craft", label: "Craft" },
-  { value: "source", label: "Source" },
-  { value: "lore", label: "Lore" },
+  { value: "theme", label: "Theme" },
+  { value: "motif", label: "Motif" },
   { value: "question", label: "Question" },
   { value: "unspecified", label: "Unspecified" },
 ];

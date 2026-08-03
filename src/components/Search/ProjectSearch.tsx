@@ -12,6 +12,7 @@ import {
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  BookMarked,
   BookOpen,
   MapPin,
   ScrollText,
@@ -38,6 +39,7 @@ const KIND_ICON: Record<
   prose: BookOpen,
   character: Users,
   location: MapPin,
+  encyclopedia: BookMarked,
   research: ScrollText,
 };
 

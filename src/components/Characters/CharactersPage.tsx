@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { Plus, Search, X } from "lucide-react";
 import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
 import { DepthMeter } from "@/components/Characters/DepthMeter";
+import { FamilyTreesView } from "@/components/Characters/FamilyTreesView";
 import { SeriesBibleStrip } from "@/components/Series/SeriesBibleStrip";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
@@ -32,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type SortMode = "story" | "name" | "depth" | "role";
+type CastView = "roster" | "tree";
 
 const DEPTH_RANK = { stub: 0, sketch: 1, portrait: 2, living: 3 } as const;
 
@@ -40,6 +42,7 @@ export function CharactersPage() {
   const { book, hydrated, addCharacter, upsertCharacters, replaceCharacter } =
     useBook();
   const claude = useClaudeStatus();
+  const [view, setView] = useState<CastView>("roster");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>("story");
   const [roleFilter, setRoleFilter] = useState<CharacterRole | "all">("all");
@@ -185,8 +188,13 @@ export function CharactersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-5 pb-24 pt-10 sm:px-8 lg:px-10">
-      <header className="mb-10">
+    <div
+      className={cn(
+        "mx-auto px-5 pb-24 pt-10 sm:px-8 lg:px-10",
+        view === "tree" ? "max-w-5xl" : "max-w-3xl",
+      )}
+    >
+      <header className="mb-8">
         <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.28em] text-[var(--ink-faint)]">
           Dramatis personae
         </p>
@@ -194,37 +202,72 @@ export function CharactersPage() {
           Characters
         </h1>
         <p className="mt-4 max-w-xl font-[family-name:var(--font-ui)] text-base leading-relaxed text-[var(--ink-muted)]">
-          Cast pages grow from the manuscript. Use Claude to read the prose and
-          fill empty wiki fields — voice, wants, appearance — without overwriting
-          what you&apos;ve written by hand.
+          {view === "roster"
+            ? "Cast pages grow from the manuscript. Use Claude to read the prose and fill empty wiki fields — voice, wants, appearance — without overwriting what you&apos;ve written by hand."
+            : "Chart family lines and partnerships. Make as many trees as you need — houses, clans, or bloodlines."}
         </p>
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <ClaudeDeepenButton
-            configured={claude?.configured ?? null}
-            busy={castBusy}
-            label="Deepen cast with Claude"
-            onClick={() => void runDeepenCast()}
-          />
-          {castMessage ? (
-            <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
-              {castMessage}
-            </span>
-          ) : null}
-          {castError ? (
-            <span className="font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
-              {castError}
-            </span>
-          ) : null}
-          {claude?.configured === false ? (
-            <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-              Set ANTHROPIC_API_KEY in .env.local (see env.example)
-            </span>
-          ) : null}
+
+        <div
+          className="mt-6 inline-flex rounded-full border border-[rgba(45,42,38,0.1)] bg-[rgba(247,243,234,0.65)] p-1"
+          role="group"
+          aria-label="Cast view"
+        >
+          {(
+            [
+              { id: "roster", label: "Roster" },
+              { id: "tree", label: "Tree" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setView(opt.id)}
+              aria-pressed={view === opt.id}
+              className={cn(
+                "rounded-full px-4 py-1.5 font-[family-name:var(--font-ui)] text-sm transition-colors",
+                view === opt.id
+                  ? "bg-[rgba(45,42,38,0.1)] text-[var(--ink)]"
+                  : "text-[var(--ink-muted)] hover:text-[var(--ink)]",
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
+
+        {view === "roster" ? (
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <ClaudeDeepenButton
+              configured={claude?.configured ?? null}
+              busy={castBusy}
+              label="Deepen cast with Claude"
+              onClick={() => void runDeepenCast()}
+            />
+            {castMessage ? (
+              <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
+                {castMessage}
+              </span>
+            ) : null}
+            {castError ? (
+              <span className="font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
+                {castError}
+              </span>
+            ) : null}
+            {claude?.configured === false ? (
+              <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+                Set ANTHROPIC_API_KEY in .env.local (see env.example)
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
-      <SeriesBibleStrip kind="characters" />
+      {view === "roster" ? <SeriesBibleStrip kind="characters" /> : null}
 
+      {view === "tree" ? (
+        <FamilyTreesView />
+      ) : (
+        <>
       <div className="sticky top-0 z-20 -mx-1 mb-8 bg-[linear-gradient(180deg,#EDE8E0_70%,transparent)] pb-4 pt-1">
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[rgba(45,42,38,0.06)] bg-[rgba(247,243,234,0.72)] px-3 py-2.5 shadow-[0_8px_32px_rgba(45,42,38,0.06)] backdrop-blur-2xl sm:gap-3 sm:px-4">
           <label className="relative flex min-w-[10rem] max-w-xs flex-1 items-center">
@@ -306,6 +349,8 @@ export function CharactersPage() {
             />
           ))}
         </ul>
+      )}
+        </>
       )}
     </div>
   );

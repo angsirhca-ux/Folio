@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   BookOpen,
+  BookMarked,
   GitBranch,
   Inbox,
   LayoutGrid,
@@ -30,6 +31,7 @@ const NAV = [
   { href: "/characters", label: "Characters", icon: Users, ready: true },
   { href: "/locations", label: "Locations", icon: MapPin, ready: true },
   { href: "/map", label: "Map", icon: Map, ready: true },
+  { href: "/encyclopedia", label: "Encyclopedia", icon: BookMarked, ready: true },
   { href: "/research", label: "Research", icon: ScrollText, ready: true },
   { href: "/dump", label: "Dump", icon: Inbox, ready: true },
   { href: "/m", label: "Mobile write", icon: Smartphone, ready: true },

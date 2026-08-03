@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Book, Character, Location, ResearchEntry, StoryMap } from "@/lib/types";
+import type { Book, Character, EncyclopediaEntry, Location, ResearchEntry, StoryMap } from "@/lib/types";
 import {
   applyCharacterEnrichment,
   type CharacterEnrichmentPayload,
@@ -17,6 +17,11 @@ import {
   type DiscoveredResearch,
   type ResearchEnrichmentPayload,
 } from "@/lib/researchEnrichment";
+import {
+  applyEncyclopediaEnrichment,
+  type DiscoveredEncyclopedia,
+  type EncyclopediaEnrichmentPayload,
+} from "@/lib/encyclopediaEnrichment";
 import type { MapLayoutPayload } from "@/lib/mapLayout";
 import type { PlotThreadDiscoverPayload } from "@/lib/plotThreadEnrichment";
 
@@ -32,6 +37,8 @@ function bookPayload(book: Book) {
     characters: book.characters ?? [],
     locations: book.locations ?? [],
     research: book.research ?? [],
+    encyclopedia: book.encyclopedia ?? [],
+    encyclopediaStacks: book.encyclopediaStacks ?? [],
     plotThreads: book.plotThreads ?? [],
   };
 }
@@ -403,6 +410,96 @@ export function useResearchDeepen(
       setBusy(false);
     }
   }, [book, entry, onApply]);
+
+  return { status, busy, error, doneAt, deepen };
+}
+
+export async function enrichEncyclopediaWithClaude(
+  book: Book,
+  entryId: string,
+): Promise<EncyclopediaEnrichmentPayload> {
+  const res = await fetch("/api/encyclopedia/enrich", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      book: bookPayload(book),
+      entryId,
+    }),
+  });
+  const data = (await res.json()) as {
+    enrichment?: EncyclopediaEnrichmentPayload;
+    error?: string;
+  };
+  if (!res.ok || !data.enrichment) {
+    throw new Error(data.error || "Enrichment failed.");
+  }
+  return data.enrichment;
+}
+
+export async function discoverEncyclopediaWithClaude(
+  book: Book,
+): Promise<DiscoveredEncyclopedia[]> {
+  const res = await fetch("/api/encyclopedia/discover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ book: bookPayload(book) }),
+  });
+  const data = (await res.json()) as {
+    entries?: DiscoveredEncyclopedia[];
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(data.error || "Discovery failed.");
+  }
+  return data.entries ?? [];
+}
+
+export function mergeEnrichmentIntoEncyclopedia(
+  entry: EncyclopediaEntry,
+  enrichment: EncyclopediaEnrichmentPayload,
+  roster: EncyclopediaEntry[],
+): EncyclopediaEntry {
+  return applyEncyclopediaEnrichment(entry, enrichment, roster, "deepen");
+}
+
+export function useEncyclopediaDeepen(
+  book: Book,
+  entry: EncyclopediaEntry | undefined,
+  onApply: (next: EncyclopediaEntry) => void,
+  ensureStack?: (name: string) => string,
+) {
+  const status = useClaudeStatus();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [doneAt, setDoneAt] = useState<number | null>(null);
+
+  const deepen = useCallback(async () => {
+    if (!entry) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const enrichment = await enrichEncyclopediaWithClaude(book, entry.id);
+      const latest =
+        (book.encyclopedia ?? []).find((e) => e.id === entry.id) ?? entry;
+      let merged = mergeEnrichmentIntoEncyclopedia(
+        latest,
+        enrichment,
+        book.encyclopedia ?? [],
+      );
+      if (enrichment.stackName?.trim() && ensureStack) {
+        merged = {
+          ...merged,
+          stackId: ensureStack(enrichment.stackName),
+        };
+      }
+      onApply(merged);
+      setDoneAt(Date.now());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Enrichment failed.");
+    } finally {
+      setBusy(false);
+    }
+  }, [book, entry, onApply, ensureStack]);
 
   return { status, busy, error, doneAt, deepen };
 }

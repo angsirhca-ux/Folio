@@ -1,11 +1,14 @@
-import type { Book, ResearchEntry, ResearchKind, Chapter } from "@/lib/types";
+import type {
+  Book,
+  EncyclopediaEntry,
+  Chapter,
+} from "@/lib/types";
 import {
-  createResearchLink,
-  createResearchSource,
-  researchAppearances,
-  researchMatchesTitle,
-  namesMatch,
-} from "@/lib/research";
+  createEncyclopediaLink,
+  encyclopediaAppearances,
+  encyclopediaMatchesTitle,
+} from "@/lib/encyclopedia";
+import { namesMatch } from "@/lib/research";
 import { getSceneHtmlParts } from "@/lib/manuscriptScenes";
 import {
   MANUSCRIPT_CONTEXT_BUDGET,
@@ -15,22 +18,16 @@ import type { EnrichApplyMode } from "@/lib/characterEnrichment";
 
 const AUTO_WIKI_PREFIX = "Compiled from the manuscript";
 
-export type ResearchEnrichmentPayload = {
-  kind?: ResearchKind;
+export type EncyclopediaEnrichmentPayload = {
+  /** Suggested stack name — caller creates/matches the stack. */
+  stackName?: string;
   shortBio?: string;
   wiki?: string;
   summary?: string;
-  questions?: string;
   aliases?: string[];
   tags?: string[];
   linkedCharacters?: string[];
   linkedLocations?: string[];
-  sources?: Array<{
-    title: string;
-    citation?: string;
-    quote?: string;
-    notes?: string;
-  }>;
   links?: Array<{
     toTitle: string;
     label: string;
@@ -38,9 +35,9 @@ export type ResearchEnrichmentPayload = {
   }>;
 };
 
-export type DiscoveredResearch = {
+export type DiscoveredEncyclopedia = {
   title: string;
-  kind?: ResearchKind;
+  stackName?: string;
   shortBio?: string;
   evidence?: string;
 };
@@ -85,23 +82,36 @@ function scenePlain(html: string): string {
     .trim();
 }
 
-export function buildResearchManuscriptContext(
-  book: Pick<Book, "title" | "chapters" | "research" | "characters" | "locations">,
-  entry: ResearchEntry,
+export function buildEncyclopediaManuscriptContext(
+  book: Pick<
+    Book,
+    | "title"
+    | "chapters"
+    | "encyclopedia"
+    | "encyclopediaStacks"
+    | "characters"
+    | "locations"
+  >,
+  entry: EncyclopediaEntry,
 ): string {
-  const appearances = researchAppearances(book.chapters, entry);
+  const appearances = encyclopediaAppearances(book.chapters, entry);
+  const stackName =
+    (book.encyclopediaStacks ?? []).find((s) => s.id === entry.stackId)?.name ??
+    "Unsorted";
   const preamble = [
     `Manuscript: ${book.title || "Untitled"}`,
     `Chapters: ${book.chapters.length}`,
-    `Research topic: ${entry.title}`,
+    `Encyclopedia article: ${entry.title}`,
+    `Stack: ${stackName}`,
     entry.aliases.length ? `Aliases: ${entry.aliases.join(", ")}` : "",
-    `Kind: ${entry.kind}`,
     entry.shortBio ? `Blurb: ${entry.shortBio}` : "",
     entry.wiki && !isAutoWiki(entry.wiki) ? `Author notes:\n${entry.wiki}` : "",
     `Cast: ${(book.characters ?? []).map((c) => c.name).join(", ") || "—"}`,
     `Places: ${(book.locations ?? []).map((l) => l.name).join(", ") || "—"}`,
+    `Existing stacks: ${(book.encyclopediaStacks ?? []).map((s) => s.name).join(", ") || "(none)"}`,
     "",
     `Evidence scenes: ${appearances.length}. Use the FULL manuscript — every chapter.`,
+    "Extract IN-WORLD canon only. Do not invent outside research sources.",
     "",
   ]
     .filter(Boolean)
@@ -119,48 +129,49 @@ export function buildResearchManuscriptContext(
     byChapter[a.chapterIndex]?.push(
       [
         `---`,
-        `Chapter ${a.chapterIndex + 1}: ${a.chapterTitle}`,
-        `Scene: ${a.scene.title}${a.viaLabel ? " [label]" : " [prose]"}`,
-        a.scene.synopsis ? `Synopsis: ${a.scene.synopsis}` : "",
+        `Chapter ${a.chapterIndex + 1}: ${a.chapterTitle} / ${a.scene.title}`,
         `Labels: ${(a.scene.labels ?? []).join(", ") || "—"}`,
-        `Prose:`,
-        prose || "(empty)",
+        prose,
         "",
-      ]
-        .filter((l) => l !== "")
-        .join("\n"),
+      ].join("\n"),
     );
   }
 
-  if (appearances.length < 3) {
-    book.chapters.forEach((chapter, chapterIndex) => {
-      const htmlParts = getSceneHtmlParts(chapter.content);
-      (chapter.scenes ?? []).forEach((scene, i) => {
-        if (seen.has(scene.id)) return;
-        const prose = scenePlain(htmlParts[i] ?? "");
-        if (!prose) return;
-        const clipped =
-          prose.length > 1400 ? `${prose.slice(0, 1400).trim()}…` : prose;
-        byChapter[chapterIndex].push(
-          `---\nChapter ${chapterIndex + 1}: ${chapter.title}\nScene: ${scene.title}\nLabels: ${(scene.labels ?? []).join(", ") || "—"}\n${clipped}\n`,
-        );
-      });
+  book.chapters.forEach((chapter, chapterIndex) => {
+    const htmlParts = getSceneHtmlParts(chapter.content);
+    (chapter.scenes ?? []).forEach((scene, sceneIndex) => {
+      if (seen.has(scene.id)) return;
+      const prose = scenePlain(htmlParts[sceneIndex] ?? "");
+      if (prose.length < 40) return;
+      byChapter[chapterIndex]?.push(
+        [
+          `---`,
+          `Chapter ${chapterIndex + 1}: ${chapter.title} / ${scene.title}`,
+          `Labels: ${(scene.labels ?? []).join(", ") || "—"}`,
+          prose,
+          "",
+        ].join("\n"),
+      );
     });
-  }
+  });
 
   return packBalancedExcerpts(byChapter, MANUSCRIPT_CONTEXT_BUDGET, preamble);
 }
 
-export function buildResearchDiscoveryContext(
-  book: Pick<Book, "title" | "chapters" | "research">,
+export function buildEncyclopediaDiscoveryContext(
+  book: Pick<Book, "title" | "chapters" | "encyclopedia" | "encyclopediaStacks">,
 ): string {
   const known =
-    (book.research ?? []).map((e) => e.title).join(", ") || "(none)";
+    (book.encyclopedia ?? []).map((e) => e.title).join(", ") || "(none)";
+  const stacks =
+    (book.encyclopediaStacks ?? []).map((s) => s.name).join(", ") || "(none yet)";
   const preamble = [
     `Manuscript: ${book.title || "Untitled"}`,
     `Chapters: ${book.chapters.length}`,
-    `Already in research: ${known}`,
-    `Find outside research needs: period facts, craft questions, themes, motifs, and sources to chase — not in-world lore (that belongs in Encyclopedia).`,
+    `Already in encyclopedia: ${known}`,
+    `Existing stacks: ${stacks}`,
+    `Find in-world canon across EVERY chapter. Suggest a short stackName for each (reuse an existing stack when it fits).`,
+    `Skip literary themes/motifs (those belong in Research). Skip topics already listed.`,
     "",
     "Excerpts:",
   ].join("\n");
@@ -182,44 +193,34 @@ export function buildResearchDiscoveryContext(
   return packBalancedExcerpts(byChapter, MANUSCRIPT_CONTEXT_BUDGET, preamble);
 }
 
-export function researchSnapshotForPrompt(entry: ResearchEntry): string {
+export function encyclopediaSnapshotForPrompt(entry: EncyclopediaEntry): string {
   return JSON.stringify(
     {
       title: entry.title,
       aliases: entry.aliases,
-      kind: entry.kind,
+      stackId: entry.stackId,
       shortBio: entry.shortBio,
       wiki: isAutoWiki(entry.wiki) ? "" : entry.wiki,
       summary: entry.summary,
-      questions: entry.questions,
       linkedCharacters: entry.linkedCharacters,
       linkedLocations: entry.linkedLocations,
       tags: entry.tags.filter((t) => t !== "from-story" && t !== "label"),
-      sources: entry.sources.map((s) => ({
-        title: s.title,
-        citation: s.citation,
-        quote: s.quote,
-        notes: s.notes,
-      })),
     },
     null,
     2,
   );
 }
 
-export function applyResearchEnrichment(
-  entry: ResearchEntry,
-  payload: ResearchEnrichmentPayload,
-  roster: ResearchEntry[],
+export function applyEncyclopediaEnrichment(
+  entry: EncyclopediaEntry,
+  payload: EncyclopediaEnrichmentPayload,
+  roster: EncyclopediaEntry[],
   mode: EnrichApplyMode = "fill-empty",
-): ResearchEntry {
-  let next: ResearchEntry = { ...entry };
+): EncyclopediaEntry {
+  let next: EncyclopediaEntry = { ...entry };
   const fill = (current: string, incoming?: string) =>
     shouldFillField(current, incoming, mode);
 
-  if (payload.kind && (next.kind === "unspecified" || mode === "deepen")) {
-    next = { ...next, kind: payload.kind };
-  }
   if (fill(next.shortBio, payload.shortBio)) {
     next = { ...next, shortBio: payload.shortBio!.trim() };
   }
@@ -229,14 +230,11 @@ export function applyResearchEnrichment(
   if (fill(next.summary, payload.summary)) {
     next = { ...next, summary: payload.summary!.trim() };
   }
-  if (fill(next.questions, payload.questions)) {
-    next = { ...next, questions: payload.questions!.trim() };
-  }
 
   if (payload.aliases?.length) {
     const aliases = new Set(next.aliases);
     for (const a of payload.aliases) {
-      if (a.trim() && !researchMatchesTitle(next, a)) aliases.add(a.trim());
+      if (a.trim() && !encyclopediaMatchesTitle(next, a)) aliases.add(a.trim());
     }
     next = { ...next, aliases: [...aliases] };
   }
@@ -249,9 +247,7 @@ export function applyResearchEnrichment(
   next = { ...next, tags: [...tags] };
 
   if (payload.linkedCharacters?.length) {
-    const people = new Set(
-      mode === "deepen" ? [] : next.linkedCharacters,
-    );
+    const people = new Set(mode === "deepen" ? [] : next.linkedCharacters);
     if (mode !== "deepen") {
       for (const n of next.linkedCharacters) people.add(n);
     }
@@ -278,26 +274,6 @@ export function applyResearchEnrichment(
     };
   }
 
-  if (payload.sources?.length) {
-    const sources =
-      mode === "deepen"
-        ? next.sources.filter((s) => !s.notes.includes("(Claude)"))
-        : [...next.sources];
-    for (const s of payload.sources) {
-      if (!s.title?.trim()) continue;
-      if (sources.some((x) => namesMatch(x.title, s.title))) continue;
-      sources.push(
-        createResearchSource({
-          title: s.title.trim(),
-          citation: s.citation ?? "",
-          quote: s.quote ?? "",
-          notes: s.notes?.trim() || "From manuscript (Claude)",
-        }),
-      );
-    }
-    next = { ...next, sources };
-  }
-
   if (payload.links?.length) {
     const links =
       mode === "deepen"
@@ -306,7 +282,7 @@ export function applyResearchEnrichment(
     for (const r of payload.links) {
       if (!r.toTitle?.trim() || !r.label?.trim()) continue;
       const linked = roster.find((e) =>
-        researchMatchesTitle(e, r.toTitle),
+        encyclopediaMatchesTitle(e, r.toTitle),
       );
       if (
         links.some(
@@ -318,7 +294,7 @@ export function applyResearchEnrichment(
         continue;
       }
       links.push(
-        createResearchLink({
+        createEncyclopediaLink({
           toEntryId: linked?.id ?? "",
           toTitle: linked?.title ?? r.toTitle.trim(),
           label: r.label.trim(),
@@ -332,51 +308,30 @@ export function applyResearchEnrichment(
   return { ...next, updatedAt: Date.now() };
 }
 
-export const ENRICH_RESEARCH_TOOL = "save_research_entry";
+export const ENRICH_ENCYCLOPEDIA_TOOL = "save_encyclopedia_entry";
 
-export const enrichResearchTool = {
-  name: ENRICH_RESEARCH_TOOL,
+export const enrichEncyclopediaTool = {
+  name: ENRICH_ENCYCLOPEDIA_TOOL,
   description:
-    "Save an enriched research / commonplace entry grounded in the FULL manuscript.",
+    "Save an enriched in-world encyclopedia article grounded in the FULL manuscript.",
   input_schema: {
     type: "object" as const,
     properties: {
-      kind: {
+      stackName: {
         type: "string",
-        enum: [
-          "theme",
-          "motif",
-          "period",
-          "craft",
-          "source",
-          "question",
-          "unspecified",
-        ],
+        description:
+          "Short stack name for this article (e.g. Customs, Case files, Magic). Reuse an existing stack when it fits.",
       },
       shortBio: { type: "string" },
       wiki: {
         type: "string",
-        description: "2–5 paragraphs of research notes from the whole book.",
+        description: "2–5 paragraphs of in-world canon notes from the whole book.",
       },
       summary: { type: "string" },
-      questions: { type: "string" },
       aliases: { type: "array", items: { type: "string" } },
       tags: { type: "array", items: { type: "string" } },
       linkedCharacters: { type: "array", items: { type: "string" } },
       linkedLocations: { type: "array", items: { type: "string" } },
-      sources: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            title: { type: "string" },
-            citation: { type: "string" },
-            quote: { type: "string" },
-            notes: { type: "string" },
-          },
-          required: ["title"],
-        },
-      },
       links: {
         type: "array",
         items: {
@@ -393,12 +348,12 @@ export const enrichResearchTool = {
   },
 };
 
-export const DISCOVER_RESEARCH_TOOL = "save_discovered_research";
+export const DISCOVER_ENCYCLOPEDIA_TOOL = "save_discovered_encyclopedia";
 
-export const discoverResearchTool = {
-  name: DISCOVER_RESEARCH_TOOL,
+export const discoverEncyclopediaTool = {
+  name: DISCOVER_ENCYCLOPEDIA_TOOL,
   description:
-    "List outside research topics (sources, period facts, craft questions, themes) from the FULL manuscript not already listed.",
+    "List in-world encyclopedia articles from the FULL manuscript not already listed.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -408,17 +363,9 @@ export const discoverResearchTool = {
           type: "object",
           properties: {
             title: { type: "string" },
-            kind: {
+            stackName: {
               type: "string",
-              enum: [
-                "theme",
-                "motif",
-                "period",
-                "craft",
-                "source",
-                "question",
-                "unspecified",
-              ],
+              description: "Suggested stack name; reuse existing stacks when possible.",
             },
             shortBio: { type: "string" },
             evidence: { type: "string" },

@@ -2,17 +2,23 @@
 
 import type {
   CharacterDepth,
+  EncyclopediaDepth,
   LocationDepth,
   ResearchDepth,
 } from "@/lib/types";
 import {
   CHARACTER_DEPTH_META,
+  ENCYCLOPEDIA_DEPTH_META,
   LOCATION_DEPTH_META,
   RESEARCH_DEPTH_META,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type WikiDepth = CharacterDepth | LocationDepth | ResearchDepth;
+type WikiDepth =
+  | CharacterDepth
+  | LocationDepth
+  | ResearchDepth
+  | EncyclopediaDepth;
 
 const DEPTH_PROGRESS: Record<WikiDepth, number> = {
   stub: 0.12,
@@ -31,7 +37,7 @@ export function DepthMeter({
   depth: WikiDepth;
   completeness: number;
   compact?: boolean;
-  variant?: "character" | "location" | "research";
+  variant?: "character" | "location" | "research" | "encyclopedia";
   className?: string;
 }) {
   const meta =
@@ -39,7 +45,9 @@ export function DepthMeter({
       ? LOCATION_DEPTH_META[depth]
       : variant === "research"
         ? RESEARCH_DEPTH_META[depth]
-        : CHARACTER_DEPTH_META[depth];
+        : variant === "encyclopedia"
+          ? ENCYCLOPEDIA_DEPTH_META[depth]
+          : CHARACTER_DEPTH_META[depth];
   const width = Math.max(DEPTH_PROGRESS[depth], completeness) * 100;
 
   return (

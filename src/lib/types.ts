@@ -78,6 +78,33 @@ export interface Character {
   updatedAt: number;
 }
 
+/** Parent → child edge inside a family tree. */
+export interface FamilyTreeLink {
+  id: string;
+  parentId: string;
+  childId: string;
+}
+
+/** Partner / spouse pair inside a family tree (undirected). */
+export interface FamilyTreeUnion {
+  id: string;
+  aId: string;
+  bId: string;
+}
+
+/** A named genealogy chart for this book — one cast can have several. */
+export interface FamilyTree {
+  id: string;
+  name: string;
+  order: number;
+  /** Characters included on this chart. */
+  memberIds: string[];
+  links: FamilyTreeLink[];
+  unions: FamilyTreeUnion[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** How fleshed-out a location wiki is — grows as you write. */
 export type LocationDepth = "stub" | "sketch" | "portrait" | "living";
 
@@ -147,7 +174,6 @@ export type ResearchKind =
   | "period"
   | "craft"
   | "source"
-  | "lore"
   | "question"
   | "unspecified";
 
@@ -167,7 +193,7 @@ export interface ResearchLink {
   notes: string;
 }
 
-/** A commonplace entry — theme, motif, source, or open question. */
+/** Outside sources and reference — articles, period facts, craft, questions. */
 export interface ResearchEntry {
   id: string;
   title: string;
@@ -183,6 +209,69 @@ export interface ResearchEntry {
   questions: string;
   sources: ResearchSource[];
   links: ResearchLink[];
+  linkedCharacters: string[];
+  linkedLocations: string[];
+  tags: string[];
+  /**
+   * Auto-refreshed digest from scenes, labels, and prose.
+   * Safe to overwrite on sync — separate from freeform `wiki`.
+   */
+  storyDigest: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** How fleshed-out an encyclopedia entry is — grows as you gather. */
+export type EncyclopediaDepth = "stub" | "sketch" | "portrait" | "living";
+
+/**
+ * @deprecated Fixed kinds — migrated into custom `EncyclopediaStack`s on hydrate.
+ */
+export type LegacyEncyclopediaKind =
+  | "customs"
+  | "magic"
+  | "creature"
+  | "faction"
+  | "item"
+  | "culture"
+  | "event"
+  | "concept"
+  | "mythology"
+  | "unspecified";
+
+/** A user-named stack on the encyclopedia shelf (e.g. “Customs”, “Case files”). */
+export interface EncyclopediaStack {
+  id: string;
+  name: string;
+  /** Muted accent from the encyclopedia stack palette. */
+  color: string;
+  order: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface EncyclopediaLink {
+  id: string;
+  toEntryId: string;
+  toTitle: string;
+  label: string;
+  notes: string;
+}
+
+/** A world-bible article inside the story — not outside research. */
+export interface EncyclopediaEntry {
+  id: string;
+  title: string;
+  aliases: string[];
+  /** Which custom stack this card lives in. */
+  stackId: string;
+  /** One-line index blurb. */
+  shortBio: string;
+  /** Freeform canon notes. */
+  wiki: string;
+  /** Distilled canon summary. */
+  summary: string;
+  links: EncyclopediaLink[];
   linkedCharacters: string[];
   linkedLocations: string[];
   tags: string[];
@@ -230,7 +319,8 @@ export type TrashKind =
   | "chapter"
   | "character"
   | "location"
-  | "research";
+  | "research"
+  | "encyclopedia";
 
 /** Soft-deleted manuscript piece — lives until restored or purged. */
 export interface TrashItem {
@@ -255,7 +345,8 @@ export type TrashPayload =
   | { kind: "chapter"; chapter: Chapter }
   | { kind: "character"; character: Character }
   | { kind: "location"; location: Location }
-  | { kind: "research"; entry: ResearchEntry };
+  | { kind: "research"; entry: ResearchEntry }
+  | { kind: "encyclopedia"; entry: EncyclopediaEntry };
 
 /** A full manuscript moved out of the library shelf. */
 export interface TrashedBook {
@@ -328,8 +419,14 @@ export interface Book {
   author: string;
   chapters: Chapter[];
   characters: Character[];
+  /** Named family trees for the cast. */
+  familyTrees: FamilyTree[];
   locations: Location[];
   research: ResearchEntry[];
+  /** In-world canon articles, grouped by custom stacks. */
+  encyclopedia: EncyclopediaEntry[];
+  /** User-named stacks that group encyclopedia cards. */
+  encyclopediaStacks: EncyclopediaStack[];
   /**
    * All story maps for this book (London streets, fantasy continent, …).
    * One is active at a time via `activeMapId`.
@@ -661,7 +758,6 @@ export const RESEARCH_KIND_META: Record<ResearchKind, { label: string }> = {
   period: { label: "Period" },
   craft: { label: "Craft" },
   source: { label: "Source" },
-  lore: { label: "Lore" },
   question: { label: "Question" },
   unspecified: { label: "Unspecified" },
 };
@@ -676,12 +772,37 @@ export const RESEARCH_DEPTH_META: Record<
   living: { label: "Living", hint: "Sources, links, and story presence" },
 };
 
+export const ENCYCLOPEDIA_DEPTH_META: Record<
+  EncyclopediaDepth,
+  { label: string; hint: string }
+> = {
+  stub: { label: "Stub", hint: "A title — waiting for notes" },
+  sketch: { label: "Sketch", hint: "Blurb started" },
+  portrait: { label: "Portrait", hint: "Canon taking shape" },
+  living: { label: "Living", hint: "Links and story presence" },
+};
+
+/** Labels used when migrating old fixed kind values into custom stacks. */
+export const LEGACY_ENCYCLOPEDIA_KIND_LABEL: Record<string, string> = {
+  customs: "Customs",
+  magic: "Magic",
+  creature: "Creatures",
+  faction: "Factions",
+  item: "Items",
+  culture: "Culture",
+  event: "Events",
+  concept: "Concepts",
+  mythology: "Mythology",
+  unspecified: "General",
+};
+
 export const TRASH_KIND_META: Record<TrashKind, { label: string }> = {
   scene: { label: "Scene" },
   chapter: { label: "Chapter" },
   character: { label: "Character" },
   location: { label: "Location" },
   research: { label: "Research" },
+  encyclopedia: { label: "Encyclopedia" },
 };
 
 export const DEVELOPMENTAL_PASS_META: Record<

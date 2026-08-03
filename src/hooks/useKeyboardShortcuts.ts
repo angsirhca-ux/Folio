@@ -12,6 +12,7 @@ interface ShortcutHandlers {
   onToggleInspector?: () => void;
   onToggleGoals?: () => void;
   onToggleResearch?: () => void;
+  onToggleEncyclopedia?: () => void;
   onOpenExport?: () => void;
   onOpenImport?: () => void;
   onSave?: () => void;
@@ -71,6 +72,13 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
       if (mod && e.altKey && e.key.toLowerCase() === "r") {
         e.preventDefault();
         handlers.onToggleResearch?.();
+        return;
+      }
+
+      // ⌘⌥E — encyclopedia rail beside manuscript
+      if (mod && e.altKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        handlers.onToggleEncyclopedia?.();
         return;
       }
 
