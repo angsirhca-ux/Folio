@@ -142,11 +142,25 @@ export function disconnectDropbox() {
   }
 }
 
-function redirectUri(): string {
+/** Vercel preview/deployment hosts (not the stable project alias). */
+function isEphemeralVercelHost(hostname: string): boolean {
+  if (!hostname.endsWith(".vercel.app")) return false;
+  if (hostname.includes("-git-")) return true;
+  // e.g. folio-85gsrh4x5-folio17.vercel.app
+  return /-[a-z0-9]{8,}(?:-|$)/i.test(hostname.replace(/\.vercel\.app$/i, ""));
+}
+
+function appOrigin(): string {
   if (typeof window === "undefined") return "";
   // Prefer explicit production origin so preview/alias hosts don't break OAuth.
   const configured = process.env.NEXT_PUBLIC_APP_ORIGIN?.trim().replace(/\/$/, "");
-  const origin = configured || window.location.origin;
+  if (configured) return configured;
+  return window.location.origin;
+}
+
+function redirectUri(): string {
+  const origin = appOrigin();
+  if (!origin) return "";
   return `${origin}${DROPBOX_REDIRECT_PATH}`;
 }
 
@@ -179,6 +193,16 @@ export async function beginDropboxAuth(): Promise<void> {
   if (!clientId) {
     throw new Error(
       "NEXT_PUBLIC_DROPBOX_APP_KEY is not set. Add it to .env.local (see env.example).",
+    );
+  }
+  const configured = process.env.NEXT_PUBLIC_APP_ORIGIN?.trim();
+  if (
+    typeof window !== "undefined" &&
+    !configured &&
+    isEphemeralVercelHost(window.location.hostname)
+  ) {
+    throw new Error(
+      "This is a temporary Vercel preview URL. Open https://folio-jet-eta.vercel.app to connect Dropbox, or set NEXT_PUBLIC_APP_ORIGIN on Vercel to that origin.",
     );
   }
   const verifier = randomVerifier();

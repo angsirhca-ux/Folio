@@ -4,10 +4,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { Copy, HardDriveDownload, Plus, Search, Trash2, X } from "lucide-react";
+import {
+  Copy,
+  Download,
+  HardDriveDownload,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackupDialog } from "@/components/Backup/BackupDialog";
+import { ExportDialog } from "@/components/Export/ExportDialog";
+import { ImportDialog } from "@/components/Import/ImportDialog";
 import { useBook } from "@/providers/BookProvider";
 import { bookSceneCount, bookWordCount } from "@/lib/trash";
 import { formatRelativeDate } from "@/lib/scenes";
@@ -37,6 +48,8 @@ export function BooksPage() {
   const [sort, setSort] = useState<SortMode>("updated");
   const [pendingDelete, setPendingDelete] = useState<Book | null>(null);
   const [backupOpen, setBackupOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   useEffect(() => {
     if (searchParams.get("dropbox") === "connected") {
@@ -102,8 +115,8 @@ export function BooksPage() {
           Books
         </h1>
         <p className="mt-4 max-w-xl font-[family-name:var(--font-ui)] text-base leading-relaxed text-[var(--ink-muted)]">
-          Your manuscripts live on this shelf. Group sequels into a series bible
-          so cast and places travel with you into book two.
+          Your manuscripts live on this shelf. Connect Dropbox once — the whole
+          shelf syncs between desk and phone. Open a book here to write.
         </p>
       </header>
 
@@ -192,6 +205,26 @@ export function BooksPage() {
             size="sm"
             variant="outline"
             className="ml-auto gap-1.5 rounded-full"
+            onClick={() => setImportOpen(true)}
+            title={`Upload into “${book.title || "Untitled"}”`}
+          >
+            <Upload className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Upload
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 rounded-full"
+            onClick={() => setExportOpen(true)}
+            title={`Export “${book.title || "Untitled"}”`}
+          >
+            <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Export
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 rounded-full"
             onClick={() => setBackupOpen(true)}
           >
             <HardDriveDownload className="h-3.5 w-3.5" strokeWidth={1.5} />
@@ -244,6 +277,14 @@ export function BooksPage() {
               active={item.id === book.id}
               index={i}
               onOpen={() => openBook(item.id)}
+              onUpload={() => {
+                switchBook(item.id);
+                setImportOpen(true);
+              }}
+              onExport={() => {
+                switchBook(item.id);
+                setExportOpen(true);
+              }}
               onDuplicate={() => {
                 duplicateBook(item.id);
                 router.push("/");
@@ -271,6 +312,8 @@ export function BooksPage() {
         }}
       />
 
+      <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
+      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <BackupDialog open={backupOpen} onOpenChange={setBackupOpen} />
     </div>
   );
@@ -283,6 +326,8 @@ function BookRow({
   active,
   index,
   onOpen,
+  onUpload,
+  onExport,
   onDuplicate,
   onDelete,
   onAssignSeries,
@@ -293,6 +338,8 @@ function BookRow({
   active: boolean;
   index: number;
   onOpen: () => void;
+  onUpload: () => void;
+  onExport: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onAssignSeries: (seriesId: string | null) => void;
@@ -355,6 +402,24 @@ function BookRow({
             onClick={onOpen}
           >
             Open
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1.5 rounded-full"
+            onClick={onUpload}
+          >
+            <Upload className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Upload
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="gap-1.5 rounded-full"
+            onClick={onExport}
+          >
+            <Download className="h-3.5 w-3.5" strokeWidth={1.5} />
+            Export
           </Button>
           {seriesOptions.length > 0 ? (
             <select

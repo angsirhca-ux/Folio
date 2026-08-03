@@ -9,8 +9,6 @@ import {
   Maximize2,
   Minimize2,
   StickyNote,
-  Download,
-  Upload,
   ScrollText,
   Sparkles,
   Tags,
@@ -342,22 +340,6 @@ export function WritingApp() {
           title="Beta readers — memory across chapters, reactions only"
         >
           <Users className="h-4 w-4" strokeWidth={1.5} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Upload manuscript"
-          onClick={() => setImportOpen(true)}
-        >
-          <Upload className="h-4 w-4" strokeWidth={1.5} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="Export"
-          onClick={() => setExportOpen(true)}
-        >
-          <Download className="h-4 w-4" strokeWidth={1.5} />
         </Button>
         <Button
           variant="ghost"
