@@ -21,6 +21,7 @@ import { ManuscriptEditor } from "@/components/Editor/ManuscriptEditor";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
 import { formatRelativeDate } from "@/lib/scenes";
+import { dropboxRedirectUriForDisplay } from "@/lib/dropboxSync";
 import { cn } from "@/lib/utils";
 
 type Mode = "manuscript" | "dump";
@@ -154,6 +155,10 @@ export function MobileWriteApp() {
             <p className="font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
               Connect Dropbox so this phone and your desktop share the same
               library.
+            </p>
+            <p className="mt-2 break-all font-[family-name:var(--font-ui)] text-[0.65rem] text-[var(--ink-faint)]">
+              OAuth redirect (must match Dropbox exactly):{" "}
+              {dropboxRedirectUriForDisplay()}
             </p>
             <Button
               size="sm"

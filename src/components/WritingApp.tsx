@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   PanelLeft,
@@ -13,11 +12,9 @@ import {
   Download,
   Upload,
   ScrollText,
-  Smartphone,
   Sparkles,
   Tags,
   Users,
-  X,
 } from "lucide-react";
 import type { Editor } from "@tiptap/react";
 import { BookPage } from "@/components/BookPage/BookPage";
@@ -74,15 +71,6 @@ export function WritingApp() {
     useState<DevelopmentalPassKind>("style");
   const [toolbarVisible, setToolbarVisible] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
-  const [mobileBanner, setMobileBanner] = useState(false);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 720px)");
-    const update = () => setMobileBanner(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
 
   function resolveInspectorSceneId(): string | null {
     if (
@@ -405,35 +393,6 @@ export function WritingApp() {
       </header>
 
       <FocusModeIndicator />
-
-      {mobileBanner ? (
-        <div className="folio-chrome fixed left-1/2 top-[4.25rem] z-40 flex w-[min(92vw,22rem)] -translate-x-1/2 items-start gap-2 rounded-2xl border border-[var(--border)] bg-[var(--sidebar)] px-3 py-2.5 shadow-[0_8px_28px_var(--shadow)]">
-          <Smartphone
-            className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]"
-            strokeWidth={1.5}
-          />
-          <div className="min-w-0 flex-1">
-            <p className="font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink)]">
-              Writing on a phone?{" "}
-              <Link
-                href="/m"
-                className="text-[var(--accent)] underline-offset-2 hover:underline"
-              >
-                Open mobile write
-              </Link>{" "}
-              — connect Dropbox to sync with your desk.
-            </p>
-          </div>
-          <button
-            type="button"
-            aria-label="Dismiss"
-            onClick={() => setMobileBanner(false)}
-            className="rounded-md p-1 text-[var(--ink-faint)]"
-          >
-            <X className="h-3.5 w-3.5" strokeWidth={1.5} />
-          </button>
-        </div>
-      ) : null}
 
       <main
         data-folio-scroll

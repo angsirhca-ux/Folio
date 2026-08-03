@@ -144,7 +144,15 @@ export function disconnectDropbox() {
 
 function redirectUri(): string {
   if (typeof window === "undefined") return "";
-  return `${window.location.origin}${DROPBOX_REDIRECT_PATH}`;
+  // Prefer explicit production origin so preview/alias hosts don't break OAuth.
+  const configured = process.env.NEXT_PUBLIC_APP_ORIGIN?.trim().replace(/\/$/, "");
+  const origin = configured || window.location.origin;
+  return `${origin}${DROPBOX_REDIRECT_PATH}`;
+}
+
+/** URI Folio will send to Dropbox — useful for debugging App Console mismatches. */
+export function dropboxRedirectUriForDisplay(): string {
+  return redirectUri() || `(open Folio in a browser)…${DROPBOX_REDIRECT_PATH}`;
 }
 
 function base64Url(buffer: ArrayBuffer): string {
@@ -191,6 +199,14 @@ export async function beginDropboxAuth(): Promise<void> {
     code_challenge: challenge,
     code_challenge_method: "S256",
     redirect_uri: redirectUri(),
+    // Explicit scopes — must match Permissions enabled in Dropbox App Console
+    scope: [
+      "account_info.read",
+      "files.content.read",
+      "files.content.write",
+      "files.metadata.read",
+      "files.metadata.write",
+    ].join(" "),
   });
   window.location.href = `https://www.dropbox.com/oauth2/authorize?${params}`;
 }
