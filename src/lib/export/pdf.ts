@@ -1,6 +1,12 @@
 import { jsPDF } from "jspdf";
 import type { Book, Chapter } from "@/lib/types";
 import {
+  applySceneBreakStyle,
+  chaptersForCompile,
+  defaultCompileOptions,
+  type CompileOptions,
+} from "./compile";
+import {
   bookFilename,
   downloadBlob,
   parseChapterBlocks,
@@ -211,16 +217,17 @@ class NovelPdf {
     }
   }
 
-  renderSceneBreak() {
+  renderSceneBreak(text: string) {
     this.ensureSpace(44);
     this.y += 18;
-    this.doc.setFont("times", "normal");
-    this.doc.setFontSize(11);
-    this.doc.setTextColor(...COLORS.muted);
-    const t = "*   *   *";
-    const w = this.doc.getTextWidth(t);
-    this.doc.text(t, (PAGE.width - w) / 2, this.y);
-    this.doc.setTextColor(...COLORS.ink);
+    if (text) {
+      this.doc.setFont("times", "normal");
+      this.doc.setFontSize(11);
+      this.doc.setTextColor(...COLORS.muted);
+      const w = this.doc.getTextWidth(text);
+      this.doc.text(text, (PAGE.width - w) / 2, this.y);
+      this.doc.setTextColor(...COLORS.ink);
+    }
     this.y += 26;
   }
 
@@ -253,11 +260,10 @@ class NovelPdf {
       if (block.type === "heading") {
         this.renderHeading(block.text, block.level ?? 1);
       } else if (block.type === "scene-break") {
-        this.renderSceneBreak();
+        this.renderSceneBreak(block.text);
       } else if (block.type === "blockquote") {
         this.renderBlockquote(block.text);
       } else {
-        // Indent continuing body paragraphs; flush after headings / breaks
         const shouldIndent =
           previous === "paragraph" || previous === "blockquote";
         this.renderParagraph(block.text, shouldIndent);
@@ -266,10 +272,13 @@ class NovelPdf {
     }
   }
 
-  renderChapter(chapter: Chapter) {
-    this.addPage();
+  renderChapter(chapter: Chapter, options: CompileOptions, startNewPage: boolean) {
+    if (startNewPage) this.addPage();
 
-    const blocks = parseChapterBlocks(chapter.content);
+    const blocks = applySceneBreakStyle(
+      parseChapterBlocks(chapter.content),
+      options.sceneBreak,
+    );
     const hasH1 = blocks.some((b) => b.type === "heading" && b.level === 1);
     if (!hasH1) {
       this.renderHeading(chapter.title || "Chapter", 1);
@@ -283,20 +292,32 @@ class NovelPdf {
   }
 }
 
-export async function buildPdf(book: Book): Promise<Blob> {
+export async function buildPdf(
+  book: Book,
+  options: CompileOptions = defaultCompileOptions(book),
+): Promise<Blob> {
   const title = book.title.trim() || "Untitled Manuscript";
   const author = book.author.trim();
+  const chapters = chaptersForCompile(book, options);
   const pdf = new NovelPdf();
 
-  pdf.titlePage(title, author);
-  for (const chapter of book.chapters) {
-    pdf.renderChapter(chapter);
+  if (options.includeTitlePage) {
+    pdf.titlePage(title, author);
   }
+
+  chapters.forEach((chapter, index) => {
+    const startNewPage = options.includeTitlePage || index > 0;
+    pdf.renderChapter(chapter, options, startNewPage);
+  });
 
   return pdf.finalize();
 }
 
-export async function exportPdf(book: Book): Promise<void> {
-  const blob = await buildPdf(book);
+export async function exportPdf(
+  book: Book,
+  options?: CompileOptions,
+): Promise<void> {
+  const opts = options ?? defaultCompileOptions(book);
+  const blob = await buildPdf(book, opts);
   downloadBlob(blob, bookFilename(book, "pdf"));
 }

@@ -24,6 +24,7 @@ import { BetaReadersPanel } from "@/components/Editor/BetaReadersPanel";
 import { CritiquePanel } from "@/components/Editor/CritiquePanel";
 import { DevelopmentalPanel } from "@/components/Editor/DevelopmentalPanel";
 import { BackupDialog } from "@/components/Backup/BackupDialog";
+import { useManuscriptEditor } from "@/providers/ManuscriptEditorContext";
 import { ExportDialog } from "@/components/Export/ExportDialog";
 import { FocusModeIndicator } from "@/components/FocusMode/FocusMode";
 import { ImportDialog } from "@/components/Import/ImportDialog";
@@ -81,6 +82,7 @@ export function WritingApp() {
     useState<DevelopmentalPassKind>("style");
   const [toolbarVisible, setToolbarVisible] = useState(false);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const { setEditor: setManuscriptEditor } = useManuscriptEditor();
 
   function resolveInspectorSceneId(): string | null {
     if (
@@ -247,9 +249,13 @@ export function WritingApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, [settings.fullscreen, toggleFullscreen]);
 
-  const onEditorReady = useCallback((ed: Editor | null) => {
-    setEditor(ed);
-  }, []);
+  const onEditorReady = useCallback(
+    (ed: Editor | null) => {
+      setEditor(ed);
+      setManuscriptEditor(ed);
+    },
+    [setManuscriptEditor],
+  );
 
   const sidebarOffset =
     settings.sidebarOpen && !settings.fullscreen

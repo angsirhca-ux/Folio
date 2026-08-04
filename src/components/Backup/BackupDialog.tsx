@@ -10,6 +10,8 @@ import {
   FolderX,
   HardDriveDownload,
   Loader2,
+  Pencil,
+  Pin,
   RotateCcw,
   Trash2,
   Upload,
@@ -27,6 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { useBook } from "@/providers/BookProvider";
 import { readBackupFile } from "@/lib/backup";
 import { formatRelativeDate } from "@/lib/scenes";
+import { snapshotWordDelta } from "@/lib/snapshots";
 import { formatWordCount, cn } from "@/lib/utils";
 
 export function BackupDialog({
@@ -44,8 +47,10 @@ export function BackupDialog({
     restoreFromBackup,
     listBookSnapshots,
     takeBookSnapshot,
+    renameBookSnapshot,
     restoreBookSnapshot,
     deleteBookSnapshot,
+    summarizeSnapshotDiff,
     dropboxStatus,
     dropboxSyncing,
     dropboxConflict,
@@ -72,8 +77,20 @@ export function BackupDialog({
   const [pendingSnapRestore, setPendingSnapRestore] = useState<string | null>(
     null,
   );
+  const [checkpointName, setCheckpointName] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [restoreDiffLines, setRestoreDiffLines] = useState<string[]>([]);
 
   const snapshots = listBookSnapshots();
+
+  useEffect(() => {
+    if (!pendingSnapRestore) {
+      setRestoreDiffLines([]);
+      return;
+    }
+    setRestoreDiffLines(summarizeSnapshotDiff(pendingSnapRestore) ?? []);
+  }, [pendingSnapRestore, summarizeSnapshotDiff]);
 
   useEffect(() => {
     if (open) {
@@ -433,73 +450,149 @@ export function BackupDialog({
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
-                  Snapshots · {book.title || "Untitled"}
+                  Draft history · {book.title || "Untitled"}
                 </p>
+              </div>
+              <p className="font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                Named checkpoints stick around longer. Auto safety copies (before
+                Dropbox or restore) prune first. Prefer Dropbox or a downloaded
+                backup for long-term safety.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={checkpointName}
+                  onChange={(e) => setCheckpointName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const label =
+                        checkpointName.trim() || "Checkpoint";
+                      takeBookSnapshot(label, "checkpoint");
+                      setCheckpointName("");
+                      flash("Checkpoint saved.");
+                    }
+                  }}
+                  placeholder="Name this checkpoint…"
+                  className="h-9 min-w-[10rem] flex-1 rounded-full border border-[rgba(45,42,38,0.1)] bg-[rgba(247,243,234,0.7)] px-3 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:border-[var(--accent)] focus:outline-none"
+                />
                 <Button
                   type="button"
                   size="sm"
                   variant="subtle"
+                  className="gap-1.5 rounded-full"
                   onClick={() => {
-                    takeBookSnapshot("Manual");
-                    flash("Snapshot saved.");
+                    const label = checkpointName.trim() || "Checkpoint";
+                    takeBookSnapshot(label, "checkpoint");
+                    setCheckpointName("");
+                    flash("Checkpoint saved.");
                   }}
                 >
                   <Camera className="h-3.5 w-3.5" strokeWidth={1.5} />
-                  Take snapshot
+                  Save checkpoint
                 </Button>
               </div>
-              <p className="font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-                Keeps up to twelve copies of this book in the browser. Prefer
-                Dropbox or a downloaded backup for long-term safety.
-              </p>
 
               {snapshots.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-[rgba(45,42,38,0.1)] px-4 py-6 text-center font-[family-name:var(--font-ui)] text-sm italic text-[var(--ink-faint)]">
-                  No snapshots yet.
+                  No draft history yet — save a named checkpoint before a risky
+                  rewrite.
                 </p>
               ) : (
                 <ul className="space-y-2">
-                  {snapshots.map((snap) => (
-                    <li
-                      key={snap.id}
-                      className="flex items-start justify-between gap-3 rounded-xl border border-[rgba(45,42,38,0.06)] px-3 py-3"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
-                          {snap.label}
-                        </p>
-                        <p className="mt-0.5 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                          {formatRelativeDate(snap.createdAt)} ·{" "}
-                          {formatWordCount(snap.wordCount)} words ·{" "}
-                          {snap.chapterCount}{" "}
-                          {snap.chapterCount === 1 ? "chapter" : "chapters"}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
-                          title="Restore"
-                          aria-label="Restore snapshot"
-                          onClick={() => setPendingSnapRestore(snap.id)}
-                          className="rounded-lg p-1.5 text-[var(--ink-faint)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--ink)]"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} />
-                        </button>
-                        <button
-                          type="button"
-                          title="Delete"
-                          aria-label="Delete snapshot"
-                          onClick={() => {
-                            deleteBookSnapshot(snap.id);
-                            flash("Snapshot removed.");
-                          }}
-                          className="rounded-lg p-1.5 text-[var(--ink-faint)] transition-colors hover:bg-[rgba(107,58,42,0.08)] hover:text-[#6B3A2A]"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
+                  {snapshots.map((snap) => {
+                    const delta = snapshotWordDelta(snap, book);
+                    const renaming = renamingId === snap.id;
+                    return (
+                      <li
+                        key={snap.id}
+                        className="flex items-start justify-between gap-3 rounded-xl border border-[rgba(45,42,38,0.06)] px-3 py-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          {renaming ? (
+                            <input
+                              autoFocus
+                              value={renameDraft}
+                              onChange={(e) => setRenameDraft(e.target.value)}
+                              onBlur={() => {
+                                if (renameDraft.trim()) {
+                                  renameBookSnapshot(snap.id, renameDraft);
+                                  flash("Checkpoint renamed.");
+                                }
+                                setRenamingId(null);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.currentTarget.blur();
+                                }
+                                if (e.key === "Escape") {
+                                  setRenamingId(null);
+                                }
+                              }}
+                              className="w-full rounded-md border border-[var(--border)] bg-transparent px-2 py-1 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)] focus:outline-none"
+                            />
+                          ) : (
+                            <p className="flex items-center gap-1.5 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                              {snap.kind === "checkpoint" ? (
+                                <Pin
+                                  className="h-3 w-3 shrink-0 text-[var(--accent)]"
+                                  strokeWidth={1.5}
+                                />
+                              ) : null}
+                              {snap.label}
+                            </p>
+                          )}
+                          <p className="mt-0.5 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+                            {formatRelativeDate(snap.createdAt)} ·{" "}
+                            {formatWordCount(snap.wordCount)} words ·{" "}
+                            {snap.chapterCount}{" "}
+                            {snap.chapterCount === 1 ? "chapter" : "chapters"}
+                            {delta !== 0
+                              ? ` · ${delta > 0 ? "+" : ""}${delta.toLocaleString("en-US")} since then`
+                              : " · same length as now"}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <button
+                            type="button"
+                            title="Rename"
+                            aria-label="Rename checkpoint"
+                            onClick={() => {
+                              setRenamingId(snap.id);
+                              setRenameDraft(snap.label);
+                            }}
+                            className="rounded-lg p-1.5 text-[var(--ink-faint)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--ink)]"
+                          >
+                            <Pencil className="h-3.5 w-3.5" strokeWidth={1.5} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Restore"
+                            aria-label="Restore snapshot"
+                            onClick={() => setPendingSnapRestore(snap.id)}
+                            className="rounded-lg p-1.5 text-[var(--ink-faint)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--ink)]"
+                          >
+                            <RotateCcw
+                              className="h-3.5 w-3.5"
+                              strokeWidth={1.5}
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            title="Delete"
+                            aria-label="Delete snapshot"
+                            onClick={() => {
+                              deleteBookSnapshot(snap.id);
+                              flash("Snapshot removed.");
+                            }}
+                            className="rounded-lg p-1.5 text-[var(--ink-faint)] transition-colors hover:bg-[rgba(107,58,42,0.08)] hover:text-[#6B3A2A]"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+                          </button>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </section>
@@ -542,13 +635,18 @@ export function BackupDialog({
         onOpenChange={(o) => {
           if (!o) setPendingSnapRestore(null);
         }}
-        title="Restore this snapshot?"
-        description="The current manuscript will be replaced by the snapshot. A ‘Before snapshot restore’ copy is kept when storage allows."
-        confirmLabel="Restore snapshot"
+        title="Restore this draft?"
+        description={[
+          "The current manuscript will be replaced. A safety copy is kept when storage allows.",
+          "",
+          ...restoreDiffLines,
+        ].join("\n")}
+        confirmLabel="Restore draft"
+        destructive={false}
         onConfirm={() => {
           if (pendingSnapRestore) {
             restoreBookSnapshot(pendingSnapRestore);
-            flash("Snapshot restored.");
+            flash("Draft restored.");
           }
           setPendingSnapRestore(null);
         }}

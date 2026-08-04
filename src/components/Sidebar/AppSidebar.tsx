@@ -99,7 +99,7 @@ export function AppSidebar({
                 <button
                   type="button"
                   onClick={onOpenSearch}
-                  title="Search project (⌘K)"
+                  title="Search project (⌘K) · Find in manuscript (⌘F)"
                   className="group relative mb-1 flex items-center justify-center gap-3 rounded-xl px-0 py-2.5 text-[var(--ink-muted)] transition-all duration-300 hover:bg-[rgba(45,42,38,0.04)] hover:text-[var(--ink)] md:justify-start md:px-3"
                 >
                   <Search

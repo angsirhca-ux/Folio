@@ -1,4 +1,8 @@
 import type { Book, Chapter } from "@/lib/types";
+import {
+  applySceneBreakStyle,
+  type SceneBreakStyle,
+} from "./compile";
 
 export interface ManuscriptBlock {
   type: "heading" | "paragraph" | "scene-break" | "blockquote";
@@ -144,8 +148,15 @@ export function escapeXml(text: string): string {
 }
 
 /** Convert chapter HTML into clean XHTML body fragment for EPUB. */
-export function chapterToXhtmlBody(chapter: Chapter): string {
-  const blocks = parseChapterBlocks(chapter.content);
+export function chapterToXhtmlBody(
+  chapter: Chapter,
+  options?: { sceneBreak?: SceneBreakStyle },
+): string {
+  const style = options?.sceneBreak ?? "asterisks";
+  const blocks = applySceneBreakStyle(
+    parseChapterBlocks(chapter.content),
+    style,
+  );
   const parts: string[] = [];
 
   for (const block of blocks) {
@@ -155,7 +166,13 @@ export function chapterToXhtmlBody(chapter: Chapter): string {
         `<h${level}>${escapeXml(block.text)}</h${level}>`,
       );
     } else if (block.type === "scene-break") {
-      parts.push(`<p class="scene-break">* * *</p>`);
+      if (style === "blank") {
+        parts.push(`<p class="scene-break scene-break-blank">&#160;</p>`);
+      } else {
+        parts.push(
+          `<p class="scene-break">${escapeXml(block.text || "* * *")}</p>`,
+        );
+      }
     } else if (block.type === "blockquote") {
       parts.push(`<blockquote><p>${escapeXml(block.text)}</p></blockquote>`);
     } else {

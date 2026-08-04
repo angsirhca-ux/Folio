@@ -37,12 +37,14 @@ const TABS: Array<{ icon: LucideIcon; label: string; blurb: string }> = [
   {
     icon: Library,
     label: "Books",
-    blurb: "Your shelf — open a manuscript, start a series, sync backups.",
+    blurb:
+      "Your shelf — open a manuscript, start a series, sync backups. Named draft checkpoints live under Backup.",
   },
   {
     icon: BookOpen,
     label: "Manuscript",
-    blurb: "The prose itself. Chapters, scenes, and the place you write.",
+    blurb:
+      "The prose itself. Chapters, scenes, and find & replace via Search → Manuscript (⌘F).",
   },
   {
     icon: LayoutGrid,
@@ -152,9 +154,10 @@ const TOOLBAR_ICONS: Array<{ icon: LucideIcon; label: string; blurb: string }> =
 
 const SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: "⌘ K", action: "Search the project" },
+  { keys: "⌘ F", action: "Find & replace in manuscript" },
   { keys: "⌘ S", action: "Save now" },
   { keys: "⌘ O", action: "Upload / import" },
-  { keys: "⌘ E", action: "Export" },
+  { keys: "⌘ E", action: "Compile & export" },
   { keys: "⌘ ,", action: "Settings" },
   { keys: "⌘ /", action: "Formatting toolbar" },
   { keys: "⌘ ⇧ N", action: "Chapter notes" },
@@ -340,8 +343,9 @@ export function FolioHowToDialog({
               Left rail — the same icons as the tabs above
             </p>
             <p className="font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-              Settings (gear) lives on the manuscript toolbar. Search (⌘K) lives
-              at the top of the left rail.
+              Settings (gear) lives on the manuscript toolbar. Search (⌘K) and
+              find &amp; replace (⌘F) share the Search entry in the left rail —
+              toggle Project / Manuscript.
             </p>
           </Section>
 

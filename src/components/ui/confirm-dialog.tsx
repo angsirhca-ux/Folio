@@ -35,7 +35,9 @@ export function ConfirmDialog({
       <DialogContent className="max-w-[24rem]">
         <DialogHeader className="mb-5">
           <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription className="whitespace-pre-line">
+            {description}
+          </DialogDescription>
         </DialogHeader>
         <div className="flex items-center justify-end gap-2">
           <Button

@@ -1,5 +1,11 @@
 import type { Book, Chapter } from "@/lib/types";
 import {
+  applySceneBreakStyle,
+  chaptersForCompile,
+  defaultCompileOptions,
+  type CompileOptions,
+} from "./compile";
+import {
   bookFilename,
   downloadBlob,
   parseChapterBlocks,
@@ -7,13 +13,16 @@ import {
 } from "./manuscript";
 
 function blockToPlain(block: ManuscriptBlock): string {
-  if (block.type === "scene-break") return "\n* * *\n";
+  if (block.type === "scene-break") return block.text ? `\n${block.text}\n` : "\n";
   if (block.type === "heading") return block.text.toUpperCase();
   return block.text;
 }
 
-function chapterToPlain(chapter: Chapter): string {
-  const blocks = parseChapterBlocks(chapter.content);
+function chapterToPlain(chapter: Chapter, options: CompileOptions): string {
+  const blocks = applySceneBreakStyle(
+    parseChapterBlocks(chapter.content),
+    options.sceneBreak,
+  );
   const hasH1 = blocks.some((b) => b.type === "heading" && b.level === 1);
   const lines: string[] = [];
 
@@ -31,13 +40,12 @@ function chapterToPlain(chapter: Chapter): string {
       lines.push("");
     } else if (block.type === "scene-break") {
       lines.push("");
-      lines.push("* * *");
+      if (block.text) lines.push(block.text);
       lines.push("");
     } else if (block.type === "blockquote") {
       lines.push(`    ${block.text}`);
       lines.push("");
     } else {
-      // Blank line between paragraphs for readability
       if (previous === "paragraph" || previous === "blockquote") {
         lines.push("");
       }
@@ -49,18 +57,24 @@ function chapterToPlain(chapter: Chapter): string {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-export function buildTxt(book: Book): string {
+export function buildTxt(
+  book: Book,
+  options: CompileOptions = defaultCompileOptions(book),
+): string {
   const title = book.title.trim() || "Untitled Manuscript";
   const author = book.author.trim();
+  const chapters = chaptersForCompile(book, options);
   const parts: string[] = [];
 
-  parts.push(title);
-  if (author) parts.push(`by ${author}`);
-  parts.push("");
-  parts.push("—".repeat(Math.min(40, title.length + 8)));
-  parts.push("");
+  if (options.includeTitlePage) {
+    parts.push(title);
+    if (author) parts.push(`by ${author}`);
+    parts.push("");
+    parts.push("—".repeat(Math.min(40, title.length + 8)));
+    parts.push("");
+  }
 
-  book.chapters.forEach((chapter, index) => {
+  chapters.forEach((chapter, index) => {
     if (index > 0) {
       parts.push("");
       parts.push("");
@@ -68,7 +82,7 @@ export function buildTxt(book: Book): string {
       parts.push("");
       parts.push("");
     }
-    parts.push(chapterToPlain(chapter));
+    parts.push(chapterToPlain(chapter, options));
   });
 
   parts.push("");
@@ -79,9 +93,12 @@ export function buildTxt(book: Book): string {
   return parts.join("\n");
 }
 
-export async function exportTxt(book: Book): Promise<void> {
-  const text = buildTxt(book);
-  // UTF-8 BOM helps Notepad and some editors detect encoding
+export async function exportTxt(
+  book: Book,
+  options?: CompileOptions,
+): Promise<void> {
+  const opts = options ?? defaultCompileOptions(book);
+  const text = buildTxt(book, opts);
   const blob = new Blob(["\uFEFF" + text], {
     type: "text/plain;charset=utf-8",
   });

@@ -143,6 +143,9 @@ export function ManuscriptEditor({
 
   useEffect(() => {
     if (editor && onEditorReady) onEditorReady(editor);
+    return () => {
+      onEditorReady?.(null);
+    };
   }, [editor, onEditorReady]);
 
   // Flush pending prose to the document this instance was editing.

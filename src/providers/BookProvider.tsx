@@ -60,7 +60,11 @@ import {
   deleteSnapshot,
   getSnapshot,
   listSnapshots,
+  renameSnapshot,
+  diffSnapshotSummary,
+  formatSnapshotDiffLines,
   type BookSnapshot,
+  type SnapshotKind,
 } from "@/lib/snapshots";
 import { applyPlotThreadStarter, createPlotThread, toggleThreadId } from "@/lib/plotThreads";
 import { applyPlotThreadDiscovery } from "@/lib/plotThreadEnrichment";
@@ -591,9 +595,15 @@ interface BookContextValue {
   restoreFromBackup: (payload: FolioBackupPayload) => void;
   /** In-browser version history for the active book. */
   listBookSnapshots: () => BookSnapshot[];
-  takeBookSnapshot: (label?: string) => BookSnapshot | null;
+  takeBookSnapshot: (
+    label?: string,
+    kind?: SnapshotKind,
+  ) => BookSnapshot | null;
+  renameBookSnapshot: (snapshotId: string, label: string) => boolean;
   restoreBookSnapshot: (snapshotId: string) => boolean;
   deleteBookSnapshot: (snapshotId: string) => void;
+  /** What would change if this snapshot were restored. */
+  summarizeSnapshotDiff: (snapshotId: string) => string[] | null;
   saveNow: () => void;
   setTheme: (theme: ThemeId) => void;
   toggleFocusMode: () => void;
@@ -954,7 +964,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       if (decision.kind === "pull") {
         if (bookRef.current) {
           try {
-            createSnapshot(bookRef.current, "Before Dropbox pull");
+            createSnapshot(bookRef.current, "Before Dropbox pull", "auto");
           } catch {
             /* quota */
           }
@@ -2942,6 +2952,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
               choice === "remote"
                 ? "Before keeping Dropbox copy"
                 : "Before keeping this device",
+              "auto",
             );
           } catch {
             /* quota */
@@ -3005,7 +3016,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       restoreFromBackup: (payload) => {
         if (book) {
           try {
-            createSnapshot(book, "Before restore");
+            createSnapshot(book, "Before restore", "auto");
           } catch {
             /* quota — still allow restore */
           }
@@ -3044,18 +3055,27 @@ export function BookProvider({ children }: { children: ReactNode }) {
         if (!book) return [];
         return listSnapshots(book.id);
       },
-      takeBookSnapshot: (label) => {
+      takeBookSnapshot: (label, kind) => {
         if (!book) return null;
         saveBook(book);
-        const snap = createSnapshot(book, label);
+        const snap = createSnapshot(
+          book,
+          label ?? "Checkpoint",
+          kind ?? "checkpoint",
+        );
         setSnapshotsTick((t) => t + 1);
         return snap;
+      },
+      renameBookSnapshot: (snapshotId, label) => {
+        const ok = renameSnapshot(snapshotId, label);
+        if (ok) setSnapshotsTick((t) => t + 1);
+        return ok;
       },
       restoreBookSnapshot: (snapshotId) => {
         const snap = getSnapshot(snapshotId);
         if (!snap || !book) return false;
         try {
-          createSnapshot(book, "Before snapshot restore");
+          createSnapshot(book, "Before snapshot restore", "auto");
         } catch {
           /* quota */
         }
@@ -3081,6 +3101,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
       deleteBookSnapshot: (snapshotId) => {
         deleteSnapshot(snapshotId);
         setSnapshotsTick((t) => t + 1);
+      },
+      summarizeSnapshotDiff: (snapshotId) => {
+        if (!book) return null;
+        const snap = getSnapshot(snapshotId);
+        if (!snap) return null;
+        return formatSnapshotDiffLines(diffSnapshotSummary(snap, book));
       },
       libraryBooks,
       libraryTrash,

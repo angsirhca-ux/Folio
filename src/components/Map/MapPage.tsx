@@ -934,7 +934,7 @@ export function MapPage() {
     setLayoutMessage("Reading the manuscript…");
     try {
       try {
-        takeBookSnapshot("Before AI map build");
+        takeBookSnapshot("Before AI map build", "auto");
       } catch {
         /* quota */
       }

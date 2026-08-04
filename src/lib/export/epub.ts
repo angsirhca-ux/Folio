@@ -1,6 +1,11 @@
 import JSZip from "jszip";
 import type { Book } from "@/lib/types";
 import {
+  chaptersForCompile,
+  defaultCompileOptions,
+  type CompileOptions,
+} from "./compile";
+import {
   bookFilename,
   chapterToXhtmlBody,
   downloadBlob,
@@ -83,6 +88,12 @@ blockquote p {
   color: #6b645c;
 }
 
+.scene-break-blank {
+  letter-spacing: 0;
+  margin: 1.25em 0 !important;
+  color: transparent;
+}
+
 .title-page {
   text-align: center;
   margin-top: 35%;
@@ -137,14 +148,17 @@ function pad(n: number): string {
   return String(n).padStart(3, "0");
 }
 
-export async function buildEpub(book: Book): Promise<Blob> {
+export async function buildEpub(
+  book: Book,
+  options: CompileOptions = defaultCompileOptions(book),
+): Promise<Blob> {
   const zip = new JSZip();
   const title = book.title.trim() || "Untitled Manuscript";
   const author = book.author.trim() || "Anonymous";
   const bookId = `urn:uuid:${crypto.randomUUID()}`;
   const modified = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  const chapters = chaptersForCompile(book, options);
 
-  // EPUB requires mimetype as first file, stored uncompressed
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
 
   zip.folder("META-INF")!.file(
@@ -160,23 +174,25 @@ export async function buildEpub(book: Book): Promise<Blob> {
   const oebps = zip.folder("OEBPS")!;
   oebps.file("styles.css", EPUB_CSS);
 
-  // Title page
-  oebps.file(
-    "titlepage.xhtml",
-    xhtmlDocument(
-      title,
-      `<section class="title-page" epub:type="titlepage">
+  if (options.includeTitlePage) {
+    oebps.file(
+      "titlepage.xhtml",
+      xhtmlDocument(
+        title,
+        `<section class="title-page" epub:type="titlepage">
   <h1>${escapeXml(title)}</h1>
   <p class="ornament">* * *</p>
   <p class="author">${escapeXml(author)}</p>
 </section>`,
-    ),
-  );
+      ),
+    );
+  }
 
-  // Chapters
-  const chapterFiles = book.chapters.map((chapter, index) => {
+  const chapterFiles = chapters.map((chapter, index) => {
     const href = `chapter-${pad(index + 1)}.xhtml`;
-    const body = chapterToXhtmlBody(chapter);
+    const body = chapterToXhtmlBody(chapter, {
+      sceneBreak: options.sceneBreak,
+    });
     oebps.file(
       href,
       xhtmlDocument(chapter.title || `Chapter ${index + 1}`, body),
@@ -188,7 +204,6 @@ export async function buildEpub(book: Book): Promise<Blob> {
     };
   });
 
-  // Navigation document (EPUB3)
   const navList = chapterFiles
     .map(
       (c) =>
@@ -196,29 +211,54 @@ export async function buildEpub(book: Book): Promise<Blob> {
     )
     .join("\n");
 
-  oebps.file(
-    "nav.xhtml",
-    xhtmlDocument(
-      "Contents",
-      `<nav epub:type="toc" id="toc" class="nav-toc">
+  const tocTitleLink = options.includeTitlePage
+    ? `    <li><a href="titlepage.xhtml">${escapeXml(title)}</a></li>\n`
+    : "";
+
+  if (options.includeToc) {
+    oebps.file(
+      "nav.xhtml",
+      xhtmlDocument(
+        "Contents",
+        `<nav epub:type="toc" id="toc" class="nav-toc">
   <h1>Contents</h1>
   <ol>
-    <li><a href="titlepage.xhtml">${escapeXml(title)}</a></li>
+${tocTitleLink}${navList}
+  </ol>
+</nav>`,
+      ),
+    );
+  } else {
+    // EPUB3 still needs a nav document — keep it minimal / landmarks only
+    const first = chapterFiles[0]?.href ?? (options.includeTitlePage ? "titlepage.xhtml" : "");
+    oebps.file(
+      "nav.xhtml",
+      xhtmlDocument(
+        "Contents",
+        `<nav epub:type="toc" id="toc" class="nav-toc" hidden="hidden">
+  <ol>
+    ${first ? `<li><a href="${first}">${escapeXml(title)}</a></li>` : ""}
 ${navList}
   </ol>
 </nav>`,
-    ),
-  );
+      ),
+    );
+  }
 
-  // Legacy NCX for older readers
-  const ncxNav = chapterFiles
-    .map(
-      (c, i) => `    <navPoint id="${c.id}" playOrder="${i + 2}">
+  let playOrder = 1;
+  const ncxPoints: string[] = [];
+  if (options.includeTitlePage) {
+    ncxPoints.push(`    <navPoint id="title" playOrder="${playOrder++}">
+      <navLabel><text>${escapeXml(title)}</text></navLabel>
+      <content src="titlepage.xhtml"/>
+    </navPoint>`);
+  }
+  for (const c of chapterFiles) {
+    ncxPoints.push(`    <navPoint id="${c.id}" playOrder="${playOrder++}">
       <navLabel><text>${escapeXml(c.title)}</text></navLabel>
       <content src="${c.href}"/>
-    </navPoint>`,
-    )
-    .join("\n");
+    </navPoint>`);
+  }
 
   oebps.file(
     "toc.ncx",
@@ -232,17 +272,17 @@ ${navList}
   </head>
   <docTitle><text>${escapeXml(title)}</text></docTitle>
   <navMap>
-    <navPoint id="title" playOrder="1">
-      <navLabel><text>${escapeXml(title)}</text></navLabel>
-      <content src="titlepage.xhtml"/>
-    </navPoint>
-${ncxNav}
+${ncxPoints.join("\n")}
   </navMap>
 </ncx>`,
   );
 
   const manifestItems = [
-    `    <item id="titlepage" href="titlepage.xhtml" media-type="application/xhtml+xml"/>`,
+    ...(options.includeTitlePage
+      ? [
+          `    <item id="titlepage" href="titlepage.xhtml" media-type="application/xhtml+xml"/>`,
+        ]
+      : []),
     `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`,
     `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`,
     `    <item id="css" href="styles.css" media-type="text/css"/>`,
@@ -253,7 +293,9 @@ ${ncxNav}
   ].join("\n");
 
   const spineItems = [
-    `    <itemref idref="titlepage"/>`,
+    ...(options.includeTitlePage
+      ? [`    <itemref idref="titlepage"/>`]
+      : []),
     ...chapterFiles.map((c) => `    <itemref idref="${c.id}"/>`),
   ].join("\n");
 
@@ -286,8 +328,12 @@ ${spineItems}
   });
 }
 
-export async function exportEpub(book: Book): Promise<void> {
-  const blob = await buildEpub(book);
+export async function exportEpub(
+  book: Book,
+  options?: CompileOptions,
+): Promise<void> {
+  const opts = options ?? defaultCompileOptions(book);
+  const blob = await buildEpub(book, opts);
   downloadBlob(blob, bookFilename(book, "epub"));
 }
 
