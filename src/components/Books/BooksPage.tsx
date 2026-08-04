@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
+  CircleHelp,
   Copy,
   Download,
   HardDriveDownload,
@@ -19,6 +20,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { BackupDialog } from "@/components/Backup/BackupDialog";
 import { ExportDialog } from "@/components/Export/ExportDialog";
 import { ImportDialog } from "@/components/Import/ImportDialog";
+import { FolioHowToDialog } from "@/components/Help/FolioHowToDialog";
 import { useBook } from "@/providers/BookProvider";
 import { bookSceneCount, bookWordCount } from "@/lib/trash";
 import { formatRelativeDate } from "@/lib/scenes";
@@ -50,6 +52,7 @@ export function BooksPage() {
   const [backupOpen, setBackupOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [howToOpen, setHowToOpen] = useState(false);
 
   useEffect(() => {
     if (searchParams.get("dropbox") === "connected") {
@@ -118,6 +121,18 @@ export function BooksPage() {
           Your manuscripts live on this shelf. Connect Dropbox once — the whole
           shelf syncs between desk and phone. Open a book here to write.
         </p>
+        <div className="mt-6">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="gap-1.5 rounded-full"
+            onClick={() => setHowToOpen(true)}
+          >
+            <CircleHelp className="h-3.5 w-3.5" strokeWidth={1.5} />
+            How to use Folio
+          </Button>
+        </div>
       </header>
 
       <section className="mb-10">
@@ -315,6 +330,7 @@ export function BooksPage() {
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <BackupDialog open={backupOpen} onOpenChange={setBackupOpen} />
+      <FolioHowToDialog open={howToOpen} onOpenChange={setHowToOpen} />
     </div>
   );
 }

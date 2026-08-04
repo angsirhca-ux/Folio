@@ -165,6 +165,7 @@ export function parsedToBook(
     encyclopedia: existing?.encyclopedia ?? [],
     encyclopediaStacks: existing?.encyclopediaStacks ?? [],
     chronicle: existing?.chronicle ?? [],
+    soundtrack: existing?.soundtrack ?? [],
     trash: existing?.trash ?? [],
     map: existing?.map ?? emptyStoryMap(),
     maps: existing?.maps ?? [],
@@ -189,6 +190,8 @@ export function parsedToBook(
     },
     seriesId: existing?.seriesId ?? null,
     plotThreads: existing?.plotThreads ?? [],
+    // Manuscript replaced — force a fresh Claude reading before Populate.
+    manuscriptIndex: undefined,
     goals: existing?.goals ?? emptyGoals(0, now),
     activeChapterId: chapters[0].id,
     createdAt: existing?.createdAt ?? now,

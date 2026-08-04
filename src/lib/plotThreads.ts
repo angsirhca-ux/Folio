@@ -15,6 +15,101 @@ export const PLOT_THREAD_PALETTE = [
 
 export const QUIET_GAP_MIN = 3;
 
+/** Genre starter packs — preload tracks; rename freely after. */
+export const PLOT_THREAD_STARTERS: Array<{
+  id: string;
+  label: string;
+  hint: string;
+  threads: string[];
+}> = [
+  {
+    id: "blank",
+    label: "Blank",
+    hint: "Start empty — name tracks yourself",
+    threads: [],
+  },
+  {
+    id: "fantasy",
+    label: "Fantasy",
+    hint: "Quest, magic, factions, and the hero’s change",
+    threads: [
+      "Main quest",
+      "Hero’s arc",
+      "Magic & world rules",
+      "Politics & factions",
+      "Antagonist",
+      "Companions / found family",
+      "Mystery of the past",
+    ],
+  },
+  {
+    id: "fiction",
+    label: "Fiction",
+    hint: "External plot, internal arc, and the B-story",
+    threads: [
+      "Main plot",
+      "Character arc",
+      "Relationship / B-story",
+      "Opposition",
+      "Mystery / reveal",
+      "Secondary character",
+    ],
+  },
+  {
+    id: "romantasy",
+    label: "Romantasy",
+    hint: "Co-equal fantasy plot and romance — neither is garnish",
+    threads: [
+      "Fantasy plot",
+      "Romance arc",
+      "Magic / bond",
+      "Politics & power",
+      "Desire vs duty",
+      "Rival / second lead",
+      "Found family",
+    ],
+  },
+  {
+    id: "contemporary",
+    label: "Contemporary",
+    hint: "Want, work, love, family, and the secret under it",
+    threads: [
+      "External want",
+      "Internal arc",
+      "Romance / central relationship",
+      "Family",
+      "Work / institution",
+      "Friendship",
+      "Secret / reveal",
+    ],
+  },
+];
+
+/**
+ * Add missing starter threads onto a book (idempotent by name).
+ * Does not assign scenes — Tracks stay empty until the author or Claude marks them.
+ */
+export function applyPlotThreadStarter(
+  threads: PlotThread[],
+  starterId: string,
+): PlotThread[] {
+  const starter = PLOT_THREAD_STARTERS.find((s) => s.id === starterId);
+  if (!starter || starter.threads.length === 0) return threads;
+
+  const existingLower = new Set(
+    threads.map((t) => t.name.trim().toLowerCase()),
+  );
+  let next = [...threads];
+  for (const name of starter.threads) {
+    const key = name.trim().toLowerCase();
+    if (!key || existingLower.has(key)) continue;
+    if (next.length >= 12) break;
+    existingLower.add(key);
+    next.push(createPlotThread({ name }, next.length));
+  }
+  return next;
+}
+
 export function createPlotThread(
   partial?: Partial<Omit<PlotThread, "id" | "createdAt" | "updatedAt">> & {
     id?: string;

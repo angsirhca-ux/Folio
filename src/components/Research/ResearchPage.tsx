@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Plus, Search, X } from "lucide-react";
-import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
+import {
+  ManuscriptIndexControls,
+  useManuscriptIndex,
+} from "@/components/Manuscript/ManuscriptIndexControls";
 import { DepthMeter } from "@/components/Characters/DepthMeter";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
@@ -17,17 +20,12 @@ import {
   researchDepth,
 } from "@/lib/research";
 import {
-  discoverResearchWithClaude,
-  enrichResearchWithClaude,
-  mergeEnrichmentIntoResearch,
-  useClaudeStatus,
-} from "@/hooks/useClaudeEnrichment";
-import {
   RESEARCH_KIND_META,
   povColor,
   type ResearchEntry,
   type ResearchKind,
 } from "@/lib/types";
+import { CLARENCE } from "@/lib/clarence";
 import { cn } from "@/lib/utils";
 
 type SortMode = "story" | "title" | "depth" | "kind";
@@ -46,15 +44,12 @@ const KIND_ORDER: Record<ResearchKind, number> = {
 
 export function ResearchPage() {
   const router = useRouter();
-  const { book, hydrated, addResearch, upsertResearch, replaceResearch } =
-    useBook();
-  const claude = useClaudeStatus();
+  const { book, hydrated, addResearch, upsertResearch } = useBook();
+  const indexApi = useManuscriptIndex();
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>("story");
   const [kindFilter, setKindFilter] = useState<ResearchKind | "all">("all");
-  const [dossierBusy, setDossierBusy] = useState(false);
   const [dossierMessage, setDossierMessage] = useState<string | null>(null);
-  const [dossierError, setDossierError] = useState<string | null>(null);
 
   const entries = book.research ?? [];
 
@@ -118,73 +113,36 @@ export function ResearchPage() {
     router.push(`/research/${id}`);
   }
 
-  const runDeepenDossier = useCallback(async () => {
-    setDossierBusy(true);
-    setDossierError(null);
-    setDossierMessage("Scanning manuscript for themes and motifs…");
-
+  async function runPopulateResearch() {
+    indexApi.setError(null);
+    setDossierMessage(null);
+    const index = await indexApi.ensureIndex();
+    indexApi.setPhase("applying");
     try {
-      const discovered = await discoverResearchWithClaude(book);
       let rosterSnapshot = [...(book.research ?? [])];
       const created: ResearchEntry[] = [];
-
-      for (const d of discovered) {
+      for (const d of index.research ?? []) {
         if (findResearchByTitle(rosterSnapshot, d.title)) continue;
         const next = createResearchEntry({
           title: d.title,
           kind: d.kind ?? "unspecified",
           shortBio: d.shortBio ?? "",
-          tags: ["from-story", "claude"],
+          tags: ["from-story", "clarence"],
         });
         created.push(next);
         rosterSnapshot.push(next);
       }
-
-      if (created.length) {
-        upsertResearch(created);
-        setDossierMessage(
-          `Added ${created.length}. Deepening ${rosterSnapshot.length}…`,
-        );
-      } else {
-        setDossierMessage(`Deepening ${rosterSnapshot.length}…`);
-      }
-
-      let enriched = 0;
-      for (let i = 0; i < rosterSnapshot.length; i++) {
-        const target = rosterSnapshot[i];
-        setDossierMessage(`Deepening ${i + 1} of ${rosterSnapshot.length}…`);
-        try {
-          const enrichment = await enrichResearchWithClaude(
-            { ...book, research: rosterSnapshot },
-            target.id,
-          );
-          const merged = mergeEnrichmentIntoResearch(
-            target,
-            enrichment,
-            rosterSnapshot,
-          );
-          replaceResearch(merged);
-          rosterSnapshot = rosterSnapshot.map((e) =>
-            e.id === merged.id ? merged : e,
-          );
-          enriched += 1;
-        } catch {
-          // continue
-        }
-      }
-
+      if (created.length) upsertResearch(created);
       setDossierMessage(
-        `Done — ${enriched} deepened${created.length ? `, ${created.length} added` : ""}.`,
+        created.length
+          ? `Added ${created.length} from the manuscript reading. Open a card to deepen.`
+          : "No new research entries — reading is up to date. Open a card to deepen.",
       );
-    } catch (e) {
-      setDossierError(
-        e instanceof Error ? e.message : "Commonplace deepen failed.",
-      );
-      setDossierMessage(null);
+      window.setTimeout(() => setDossierMessage(null), 5000);
     } finally {
-      setDossierBusy(false);
+      indexApi.setPhase("idle");
     }
-  }, [book, upsertResearch, replaceResearch]);
+  }
 
   if (!hydrated) {
     return (
@@ -207,30 +165,20 @@ export function ResearchPage() {
         </h1>
         <p className="mt-4 max-w-xl font-[family-name:var(--font-ui)] text-base leading-relaxed text-[var(--ink-muted)]">
           Outside sources and reference — articles, period facts, craft notes,
-          and open questions. Story-world canon lives in Encyclopedia. Claude
+          and open questions. Story-world canon lives in Encyclopedia. Clarence
           fills empty fields without overwriting what you&apos;ve written by
           hand.
         </p>
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <ClaudeDeepenButton
-            configured={claude?.configured ?? null}
-            busy={dossierBusy}
-            label="Deepen research with Claude"
-            onClick={() => void runDeepenDossier()}
+        <div className="mt-6 flex flex-col gap-2">
+          <ManuscriptIndexControls
+            api={indexApi}
+            onPopulate={runPopulateResearch}
+            populateLabel={CLARENCE.populateLabel}
+            populateTitle="Add research entries from the manuscript reading"
           />
           {dossierMessage ? (
             <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
               {dossierMessage}
-            </span>
-          ) : null}
-          {dossierError ? (
-            <span className="font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
-              {dossierError}
-            </span>
-          ) : null}
-          {claude?.configured === false ? (
-            <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-              Set ANTHROPIC_API_KEY in .env.local (see env.example)
             </span>
           ) : null}
         </div>
@@ -415,7 +363,7 @@ function EmptyCommonplace({
       <p className="mx-auto mt-3 max-w-sm font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
         {hasSearch
           ? "Try another search, or add a new entry."
-          : "Add a theme the moment it surfaces — or deepen the commonplace from the manuscript with Claude."}
+          : "Add a theme the moment it surfaces — or deepen the commonplace from the manuscript with Clarence."}
       </p>
       {!hasSearch ? (
         <Button className="mt-8 gap-1.5 rounded-full" onClick={onCreate}>

@@ -356,7 +356,7 @@ export function applyLocationEnrichment(
   if (payload.connections?.length) {
     const conns =
       mode === "deepen"
-        ? next.connections.filter((r) => !r.notes.includes("(Claude)"))
+        ? next.connections.filter((r) => !r.notes.includes("(Clarence)") && !r.notes.includes("(Claude)"))
         : [...next.connections];
     for (const r of payload.connections) {
       if (!r.toName?.trim() || !r.label?.trim()) continue;
@@ -378,7 +378,7 @@ export function applyLocationEnrichment(
           toName: linked?.name ?? r.toName.trim(),
           label: r.label.trim(),
           notes: (
-            r.notes?.trim() || "Inferred from the manuscript (Claude)"
+            r.notes?.trim() || "Inferred from the manuscript (Clarence)"
           ).slice(0, 400),
         }),
       );

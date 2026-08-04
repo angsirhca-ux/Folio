@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Plus, Search, X } from "lucide-react";
-import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
+import {
+  ManuscriptIndexControls,
+  useManuscriptIndex,
+} from "@/components/Manuscript/ManuscriptIndexControls";
 import { DepthMeter } from "@/components/Characters/DepthMeter";
 import { SeriesBibleStrip } from "@/components/Series/SeriesBibleStrip";
 import { Button } from "@/components/ui/button";
@@ -18,17 +21,12 @@ import {
   locationDepth,
 } from "@/lib/locations";
 import {
-  discoverLocationsWithClaude,
-  enrichLocationWithClaude,
-  mergeEnrichmentIntoLocation,
-  useClaudeStatus,
-} from "@/hooks/useClaudeEnrichment";
-import {
   LOCATION_KIND_META,
   povColor,
   type Location,
   type LocationKind,
 } from "@/lib/types";
+import { CLARENCE } from "@/lib/clarence";
 import { cn } from "@/lib/utils";
 
 type SortMode = "story" | "name" | "depth" | "kind";
@@ -47,15 +45,12 @@ const KIND_ORDER: Record<LocationKind, number> = {
 
 export function LocationsPage() {
   const router = useRouter();
-  const { book, hydrated, addLocation, upsertLocations, replaceLocation } =
-    useBook();
-  const claude = useClaudeStatus();
+  const { book, hydrated, addLocation, upsertLocations } = useBook();
+  const indexApi = useManuscriptIndex();
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>("story");
   const [kindFilter, setKindFilter] = useState<LocationKind | "all">("all");
-  const [atlasBusy, setAtlasBusy] = useState(false);
   const [atlasMessage, setAtlasMessage] = useState<string | null>(null);
-  const [atlasError, setAtlasError] = useState<string | null>(null);
 
   const locations = book.locations ?? [];
 
@@ -118,71 +113,36 @@ export function LocationsPage() {
     router.push(`/locations/${id}`);
   }
 
-  const runDeepenAtlas = useCallback(async () => {
-    setAtlasBusy(true);
-    setAtlasError(null);
-    setAtlasMessage("Scanning manuscript for places…");
-
+  async function runPopulateAtlas() {
+    indexApi.setError(null);
+    setAtlasMessage(null);
+    const index = await indexApi.ensureIndex();
+    indexApi.setPhase("applying");
     try {
-      const discovered = await discoverLocationsWithClaude(book);
       let rosterSnapshot = [...(book.locations ?? [])];
       const created: Location[] = [];
-
-      for (const d of discovered) {
+      for (const d of index.locations ?? []) {
         if (findLocationByName(rosterSnapshot, d.name)) continue;
         const next = createLocation({
           name: d.name,
           kind: d.kind ?? "unspecified",
           shortBio: d.shortBio ?? "",
-          tags: ["from-story", "claude"],
+          tags: ["from-story", "clarence"],
         });
         created.push(next);
         rosterSnapshot.push(next);
       }
-
-      if (created.length) {
-        upsertLocations(created);
-        setAtlasMessage(
-          `Added ${created.length}. Deepening ${rosterSnapshot.length}…`,
-        );
-      } else {
-        setAtlasMessage(`Deepening ${rosterSnapshot.length}…`);
-      }
-
-      let enriched = 0;
-      for (let i = 0; i < rosterSnapshot.length; i++) {
-        const target = rosterSnapshot[i];
-        setAtlasMessage(`Deepening ${i + 1} of ${rosterSnapshot.length}…`);
-        try {
-          const enrichment = await enrichLocationWithClaude(
-            { ...book, locations: rosterSnapshot },
-            target.id,
-          );
-          const merged = mergeEnrichmentIntoLocation(
-            target,
-            enrichment,
-            rosterSnapshot,
-          );
-          replaceLocation(merged);
-          rosterSnapshot = rosterSnapshot.map((l) =>
-            l.id === merged.id ? merged : l,
-          );
-          enriched += 1;
-        } catch {
-          // continue
-        }
-      }
-
+      if (created.length) upsertLocations(created);
       setAtlasMessage(
-        `Done — ${enriched} deepened${created.length ? `, ${created.length} added` : ""}.`,
+        created.length
+          ? `Added ${created.length} from the manuscript reading. Open a card to deepen.`
+          : "No new place names — reading is up to date. Open a card to deepen.",
       );
-    } catch (e) {
-      setAtlasError(e instanceof Error ? e.message : "Atlas deepen failed.");
-      setAtlasMessage(null);
+      window.setTimeout(() => setAtlasMessage(null), 5000);
     } finally {
-      setAtlasBusy(false);
+      indexApi.setPhase("idle");
     }
-  }, [book, upsertLocations, replaceLocation]);
+  }
 
   if (!hydrated) {
     return (
@@ -204,30 +164,20 @@ export function LocationsPage() {
           Locations
         </h1>
         <p className="mt-4 max-w-xl font-[family-name:var(--font-ui)] text-base leading-relaxed text-[var(--ink-muted)]">
-          Place pages grow from the manuscript. Use Claude to read the prose and
+          Place pages grow from the manuscript. Use Clarence to read the prose and
           fill empty wiki fields — atmosphere, access, story function — without
           overwriting what you&apos;ve written by hand.
         </p>
-        <div className="mt-6 flex flex-wrap items-center gap-3">
-          <ClaudeDeepenButton
-            configured={claude?.configured ?? null}
-            busy={atlasBusy}
-            label="Deepen atlas with Claude"
-            onClick={() => void runDeepenAtlas()}
+        <div className="mt-6 flex flex-col gap-2">
+          <ManuscriptIndexControls
+            api={indexApi}
+            onPopulate={runPopulateAtlas}
+            populateLabel={CLARENCE.populateLabel}
+            populateTitle="Add named places from the manuscript reading"
           />
           {atlasMessage ? (
             <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
               {atlasMessage}
-            </span>
-          ) : null}
-          {atlasError ? (
-            <span className="font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
-              {atlasError}
-            </span>
-          ) : null}
-          {claude?.configured === false ? (
-            <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-              Set ANTHROPIC_API_KEY in .env.local (see env.example)
             </span>
           ) : null}
         </div>
@@ -414,7 +364,7 @@ function EmptyAtlas({
       <p className="mx-auto mt-3 max-w-sm font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
         {hasSearch
           ? "Try another search, or add a new location."
-          : "Add a place the moment the story arrives there — or deepen the atlas from the manuscript with Claude."}
+          : "Add a place the moment the story arrives there — or deepen the atlas from the manuscript with Clarence."}
       </p>
       {!hasSearch ? (
         <Button className="mt-8 gap-1.5 rounded-full" onClick={onCreate}>

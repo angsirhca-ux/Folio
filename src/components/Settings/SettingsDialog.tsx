@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { CircleHelp } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +19,7 @@ import { ThemeSwitcher } from "@/components/ThemeSwitcher/ThemeSwitcher";
 import { ExportSettingsRow } from "@/components/Export/ExportDialog";
 import { ImportSettingsRow } from "@/components/Import/ImportDialog";
 import { BackupSettingsRow } from "@/components/Backup/BackupDialog";
+import { FolioHowToDialog } from "@/components/Help/FolioHowToDialog";
 import { useBook } from "@/providers/BookProvider";
 
 interface SettingsDialogProps {
@@ -45,6 +47,7 @@ export function SettingsDialog({
     deleteManuscript,
   } = useBook();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [howToOpen, setHowToOpen] = useState(false);
 
   return (
     <>
@@ -58,6 +61,32 @@ export function SettingsDialog({
           </DialogHeader>
 
           <div className="space-y-4">
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.55)] px-3.5 py-3">
+              <div>
+                <p className="font-[family-name:var(--font-ui)] text-sm tracking-wide text-[var(--ink)]">
+                  How to use Folio
+                </p>
+                <p className="mt-0.5 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
+                  Tabs, Clarence, critiques, icons, and shortcuts
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5 rounded-full"
+                onClick={() => {
+                  setHowToOpen(true);
+                  onOpenChange(false);
+                }}
+              >
+                <CircleHelp className="h-3.5 w-3.5" strokeWidth={1.5} />
+                How to
+              </Button>
+            </div>
+
+            <Separator />
+
             <div className="space-y-2">
               <Label htmlFor="title">Manuscript title</Label>
               <input
@@ -249,6 +278,8 @@ export function SettingsDialog({
           onOpenChange(false);
         }}
       />
+
+      <FolioHowToDialog open={howToOpen} onOpenChange={setHowToOpen} />
     </>
   );
 }

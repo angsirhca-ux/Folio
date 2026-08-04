@@ -5,6 +5,10 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  ManuscriptIndexControls,
+  useManuscriptIndex,
+} from "@/components/Manuscript/ManuscriptIndexControls";
 import { useBook } from "@/providers/BookProvider";
 import { sortChronicleEvents } from "@/lib/chronicle";
 import { sortEncyclopediaStacks } from "@/lib/encyclopedia";
@@ -18,8 +22,11 @@ export function ChroniclePage() {
     updateChronicleEvent,
     deleteChronicleEvent,
     moveChronicleEvent,
+    applyChronicleFromClaude,
   } = useBook();
+  const indexApi = useManuscriptIndex();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [populateMessage, setPopulateMessage] = useState<string | null>(null);
 
   const events = useMemo(
     () => sortChronicleEvents(book.chronicle ?? []),
@@ -61,6 +68,42 @@ export function ChroniclePage() {
     setExpandedId(id);
   }
 
+  async function runPopulateChronicle() {
+    indexApi.setError(null);
+    setPopulateMessage(null);
+    const before = new Set(
+      (book.chronicle ?? []).map((e) => e.title.trim().toLowerCase()),
+    );
+    const index = await indexApi.ensureIndex();
+    indexApi.setPhase("applying");
+    try {
+      const events = index.chronicle ?? [];
+      if (!events.length) {
+        throw new Error("No world-history events in the manuscript reading.");
+      }
+      applyChronicleFromClaude({ events });
+      const added = events.filter(
+        (e) => !before.has(e.title.trim().toLowerCase()),
+      ).length;
+      const updated = events.length - added;
+      const parts: string[] = [];
+      if (added > 0) {
+        parts.push(`${added} new event${added === 1 ? "" : "s"}`);
+      }
+      if (updated > 0) {
+        parts.push(`${updated} updated`);
+      }
+      setPopulateMessage(
+        parts.length > 0
+          ? `Applied ${parts.join(", ")} from the manuscript reading.`
+          : "Chronicle updated from the manuscript reading.",
+      );
+      window.setTimeout(() => setPopulateMessage(null), 4200);
+    } finally {
+      indexApi.setPhase("idle");
+    }
+  }
+
   return (
     <div className="relative min-h-screen overflow-x-hidden">
       <div
@@ -91,7 +134,7 @@ export function ChroniclePage() {
             </Link>
             ; link events to encyclopedia cards, cast, and places.
           </p>
-          <div className="mt-6">
+          <div className="mt-6 flex flex-wrap items-center gap-3">
             <Button
               size="sm"
               className="gap-1.5 rounded-full"
@@ -100,6 +143,16 @@ export function ChroniclePage() {
               <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
               New event
             </Button>
+            <ManuscriptIndexControls
+              api={indexApi}
+              onPopulate={runPopulateChronicle}
+              populateTitle="Apply world-history events from the manuscript reading — lore ages and wars, not plot beats"
+            />
+            {populateMessage ? (
+              <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
+                {populateMessage}
+              </span>
+            ) : null}
           </div>
         </header>
 
@@ -110,16 +163,23 @@ export function ChroniclePage() {
             </p>
             <p className="max-w-sm font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
               Start with the earliest age or the first rupture that still echoes
-              in the story.
+              in the story — or let Clarence pull lore from the manuscript.
             </p>
-            <Button
-              size="sm"
-              className="mt-2 gap-1.5 rounded-full"
-              onClick={createEvent}
-            >
-              <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
-              New event
-            </Button>
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+              <Button
+                size="sm"
+                className="gap-1.5 rounded-full"
+                onClick={createEvent}
+              >
+                <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
+                New event
+              </Button>
+              <ManuscriptIndexControls
+                api={indexApi}
+                onPopulate={runPopulateChronicle}
+                populateTitle="Apply world-history events from the manuscript reading"
+              />
+            </div>
           </div>
         ) : (
           <ol className="relative space-y-0 border-l border-[rgba(45,42,38,0.12)] pl-6 sm:pl-8">

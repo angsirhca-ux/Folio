@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Book, Character, EncyclopediaEntry, Location, ResearchEntry, StoryMap } from "@/lib/types";
+import type { Book, Character, EncyclopediaEntry, Location, ManuscriptIndexData, ResearchEntry, StoryMap } from "@/lib/types";
 import {
   applyCharacterEnrichment,
   type CharacterEnrichmentPayload,
@@ -24,6 +24,8 @@ import {
 } from "@/lib/encyclopediaEnrichment";
 import type { MapLayoutPayload } from "@/lib/mapLayout";
 import type { PlotThreadDiscoverPayload } from "@/lib/plotThreadEnrichment";
+import type { ChronicleDiscoverPayload } from "@/lib/chronicleEnrichment";
+import type { SoundtrackComposePayload } from "@/lib/soundtrackCompose";
 
 type ClaudeStatus = {
   configured: boolean;
@@ -128,6 +130,58 @@ export async function populatePlotThreadsWithClaude(
     threads: data.threads ?? [],
     assignments: data.assignments ?? [],
   };
+}
+
+export async function discoverChronicleWithClaude(
+  book: Book,
+): Promise<ChronicleDiscoverPayload> {
+  const res = await fetch("/api/chronicle/discover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      book: {
+        title: book.title,
+        chapters: book.chapters,
+        chronicle: book.chronicle ?? [],
+        characters: book.characters ?? [],
+        locations: book.locations ?? [],
+        encyclopedia: book.encyclopedia ?? [],
+      },
+    }),
+  });
+  const data = (await res.json()) as ChronicleDiscoverPayload & {
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(data.error || "Could not populate chronicle.");
+  }
+  return { events: data.events ?? [] };
+}
+
+export async function composeSoundtrackWithClaude(
+  book: Book,
+  manuscriptIndex: ManuscriptIndexData,
+): Promise<SoundtrackComposePayload> {
+  const res = await fetch("/api/soundtrack/compose", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      book: {
+        title: book.title,
+        author: book.author,
+        chapters: book.chapters,
+        soundtrack: book.soundtrack ?? [],
+      },
+      manuscriptIndex,
+    }),
+  });
+  const data = (await res.json()) as SoundtrackComposePayload & {
+    error?: string;
+  };
+  if (!res.ok) {
+    throw new Error(data.error || "Could not compose soundtrack.");
+  }
+  return { songs: data.songs ?? [] };
 }
 
 export function mergeEnrichmentIntoCharacter(
@@ -502,4 +556,34 @@ export function useEncyclopediaDeepen(
   }, [book, entry, onApply, ensureStack]);
 
   return { status, busy, error, doneAt, deepen };
+}
+
+export async function indexManuscriptWithClaude(
+  book: Book,
+): Promise<{ index: import("@/lib/types").ManuscriptIndexData; passes: number }> {
+  const res = await fetch("/api/manuscript/index", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      book: {
+        title: book.title,
+        chapters: book.chapters,
+        characters: book.characters ?? [],
+        locations: book.locations ?? [],
+        research: book.research ?? [],
+        encyclopedia: book.encyclopedia ?? [],
+        chronicle: book.chronicle ?? [],
+        plotThreads: book.plotThreads ?? [],
+      },
+    }),
+  });
+  const data = (await res.json()) as {
+    index?: import("@/lib/types").ManuscriptIndexData;
+    passes?: number;
+    error?: string;
+  };
+  if (!res.ok || !data.index) {
+    throw new Error(data.error || "Could not index manuscript.");
+  }
+  return { index: data.index, passes: data.passes ?? 1 };
 }

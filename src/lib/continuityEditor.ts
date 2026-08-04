@@ -183,8 +183,7 @@ export function buildContinuityContext(
           .join(" | "),
       );
 
-      const excerpt =
-        plain.length > 700 ? `${plain.slice(0, 700)}…` : plain;
+      const excerpt = plain;
       blocks.push(
         `---\nChapter ${ci + 1} “${ch.title}” · scene ${si + 1}` +
           (scene?.title ? ` “${scene.title}”` : "") +

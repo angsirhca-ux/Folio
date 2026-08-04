@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { AppSettings, Book, Chapter, Character, DevelopmentalMemoryNote, DevelopmentalPass, DumpPage, EncyclopediaEntry, EncyclopediaStack, FamilyTree, Location, PlotThread, ResearchEntry, StoryMap, StoryMapLabel, StoryMapPath, StoryMapPin, StoryMapRegion, ThemeId, TrashedBook, BetaMemoryNote, BetaReview, CritiqueMemoryNote, CritiqueReview } from "@/lib/types";
+import type { AppSettings, Book, Chapter, Character, DevelopmentalMemoryNote, DevelopmentalPass, DumpPage, EncyclopediaEntry, EncyclopediaStack, FamilyTree, Location, ManuscriptIndexData, PlotThread, ResearchEntry, StoryMap, StoryMapLabel, StoryMapPath, StoryMapPin, StoryMapRegion, ThemeId, TrashedBook, BetaMemoryNote, BetaReview, CritiqueMemoryNote, CritiqueReview } from "@/lib/types";
 import {
   createId,
   createBookInLibrary,
@@ -62,8 +62,12 @@ import {
   listSnapshots,
   type BookSnapshot,
 } from "@/lib/snapshots";
-import { createPlotThread, toggleThreadId } from "@/lib/plotThreads";
+import { applyPlotThreadStarter, createPlotThread, toggleThreadId } from "@/lib/plotThreads";
 import { applyPlotThreadDiscovery } from "@/lib/plotThreadEnrichment";
+import {
+  applyChronicleDiscovery,
+  type ChronicleDiscoverPayload,
+} from "@/lib/chronicleEnrichment";
 import type { PlotThreadDiscoverPayload } from "@/lib/plotThreadEnrichment";
 import { themes } from "@/lib/themes";
 import { parsedToBook } from "@/lib/import/parse";
@@ -146,6 +150,16 @@ import {
   nextChronicleOrder,
   sortChronicleEvents,
 } from "@/lib/chronicle";
+import {
+  createSoundtrackSong,
+  nextSoundtrackOrder,
+  sortSoundtrackSongs,
+} from "@/lib/soundtrack";
+import {
+  applySoundtrackCompose,
+  type SoundtrackComposePayload,
+} from "@/lib/soundtrackCompose";
+import type { SoundtrackSong } from "@/lib/types";
 import {
   emptyBookTrash,
   purgeTrashItem,
@@ -489,6 +503,20 @@ interface BookContextValue {
   ) => void;
   deleteChronicleEvent: (eventId: string) => void;
   moveChronicleEvent: (eventId: string, direction: "up" | "down") => void;
+  addSoundtrackSong: (
+    partial?: Partial<
+      Pick<SoundtrackSong, "title" | "artist" | "note" | "placement" | "order">
+    >,
+  ) => string;
+  updateSoundtrackSong: (
+    songId: string,
+    partial: Partial<
+      Pick<SoundtrackSong, "title" | "artist" | "note" | "placement" | "order">
+    >,
+  ) => void;
+  deleteSoundtrackSong: (songId: string) => void;
+  moveSoundtrackSong: (songId: string, direction: "up" | "down") => void;
+  applySoundtrackFromClaude: (payload: SoundtrackComposePayload) => void;
   /** Apply a developmental-editor pass (flags + memory). Never rewrites prose. */
   applyDevelopmentalReview: (
     pass: DevelopmentalPass,
@@ -530,8 +558,12 @@ interface BookContextValue {
     partial: Partial<Pick<PlotThread, "name" | "color">>,
   ) => void;
   deletePlotThread: (threadId: string) => void;
+  /** Preload genre track names (idempotent). Does not assign scenes. */
+  applyPlotThreadStarter: (starterId: string) => void;
   toggleSceneThread: (sceneId: string, threadId: string) => void;
   applyPlotThreadsFromClaude: (payload: PlotThreadDiscoverPayload) => void;
+  applyChronicleFromClaude: (payload: ChronicleDiscoverPayload) => void;
+  setManuscriptIndex: (index: ManuscriptIndexData | undefined) => void;
   /** Jump manuscript editor to a ***–separated scene within a chapter. */
   focusScene: (chapterId: string, sceneIndex: number) => void;
   sceneFocus: { chapterId: string; sceneIndex: number; token: number } | null;
@@ -2556,6 +2588,73 @@ export function BookProvider({ children }: { children: ReactNode }) {
             updatedAt: Date.now(),
           };
         }),
+      addSoundtrackSong: (partial) => {
+        let createdId = "";
+        updateBook((b) => {
+          const songs = b.soundtrack ?? [];
+          const song = createSoundtrackSong({
+            ...partial,
+            title: partial?.title?.trim() || "New track",
+            order: partial?.order ?? nextSoundtrackOrder(songs),
+          });
+          createdId = song.id;
+          return {
+            ...b,
+            soundtrack: sortSoundtrackSongs([...songs, song]),
+            updatedAt: Date.now(),
+          };
+        });
+        return createdId;
+      },
+      updateSoundtrackSong: (songId, partial) =>
+        updateBook((b) => ({
+          ...b,
+          soundtrack: sortSoundtrackSongs(
+            (b.soundtrack ?? []).map((s) => {
+              if (s.id !== songId) return s;
+              return {
+                ...s,
+                ...partial,
+                updatedAt: Date.now(),
+              };
+            }),
+          ),
+          updatedAt: Date.now(),
+        })),
+      deleteSoundtrackSong: (songId) =>
+        updateBook((b) => ({
+          ...b,
+          soundtrack: (b.soundtrack ?? []).filter((s) => s.id !== songId),
+          updatedAt: Date.now(),
+        })),
+      moveSoundtrackSong: (songId, direction) =>
+        updateBook((b) => {
+          const sorted = sortSoundtrackSongs(b.soundtrack ?? []);
+          const index = sorted.findIndex((s) => s.id === songId);
+          if (index < 0) return b;
+          const swapWith = direction === "up" ? index - 1 : index + 1;
+          if (swapWith < 0 || swapWith >= sorted.length) return b;
+          const a = sorted[index];
+          const c = sorted[swapWith];
+          const next = sorted.map((s) => {
+            if (s.id === a.id)
+              return { ...s, order: c.order, updatedAt: Date.now() };
+            if (s.id === c.id)
+              return { ...s, order: a.order, updatedAt: Date.now() };
+            return s;
+          });
+          return {
+            ...b,
+            soundtrack: sortSoundtrackSongs(next),
+            updatedAt: Date.now(),
+          };
+        }),
+      applySoundtrackFromClaude: (payload) =>
+        updateBook((b) => ({
+          ...b,
+          soundtrack: applySoundtrackCompose(b.soundtrack ?? [], payload),
+          updatedAt: Date.now(),
+        })),
       applyDevelopmentalReview: (pass, memoryUpdates) =>
         updateBook((b) => ({
           ...b,
@@ -2764,6 +2863,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
             })),
           })),
         })),
+      applyPlotThreadStarter: (starterId) =>
+        updateBook((b) => {
+          const next = applyPlotThreadStarter(b.plotThreads ?? [], starterId);
+          if (next === (b.plotThreads ?? [])) return b;
+          return { ...b, plotThreads: next, updatedAt: Date.now() };
+        }),
       toggleSceneThread: (sceneId, threadId) =>
         updateBook((b) => ({
           ...b,
@@ -2782,6 +2887,18 @@ export function BookProvider({ children }: { children: ReactNode }) {
         })),
       applyPlotThreadsFromClaude: (payload) =>
         updateBook((b) => applyPlotThreadDiscovery(b, payload)),
+      applyChronicleFromClaude: (payload) =>
+        updateBook((b) => ({
+          ...b,
+          chronicle: applyChronicleDiscovery(b.chronicle ?? [], payload, b),
+          updatedAt: Date.now(),
+        })),
+      setManuscriptIndex: (index) =>
+        updateBook((b) => ({
+          ...b,
+          manuscriptIndex: index,
+          updatedAt: Date.now(),
+        })),
       focusScene,
       sceneFocus,
       dropboxStatus,

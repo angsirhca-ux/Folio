@@ -9,7 +9,8 @@ import {
   EncyclopediaAppearancesRail,
   EncyclopediaBackLink,
 } from "@/components/Encyclopedia/EncyclopediaAppearancesRail";
-import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
+import { ClarenceButton } from "@/components/Characters/ClaudeDeepenButton";
+import { CLARENCE } from "@/lib/clarence";
 import { DepthMeter } from "@/components/Characters/DepthMeter";
 import { WikiField } from "@/components/Characters/WikiField";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -235,7 +236,7 @@ export function EncyclopediaWikiPage({ entryId }: { entryId: string }) {
                       <option value="__new__">+ New stack…</option>
                     </select>
                   </label>
-                  <ClaudeDeepenButton
+                  <ClarenceButton
                     configured={claudeStatus?.configured ?? null}
                     busy={deepenBusy}
                     onClick={() => void deepen()}
@@ -265,8 +266,7 @@ export function EncyclopediaWikiPage({ entryId }: { entryId: string }) {
                 ) : null}
                 {claudeStatus?.configured === false ? (
                   <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                    Add ANTHROPIC_API_KEY to .env.local (see env.example), then
-                    restart the server.
+                    {CLARENCE.needsKeyHint}
                   </p>
                 ) : null}
               </div>

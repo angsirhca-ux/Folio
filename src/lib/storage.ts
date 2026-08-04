@@ -35,6 +35,8 @@ import {
   createEncyclopediaStack,
 } from "./encyclopedia";
 import { ensureBookChronicle } from "./chronicle";
+import { ensureBookSoundtrack } from "./soundtrack";
+import { ensureBookManuscriptIndex } from "./manuscriptIndex";
 import {
   bookSceneCount,
   bookWordCount,
@@ -87,6 +89,7 @@ export function createEmptyBook(): Book {
     encyclopedia: [],
     encyclopediaStacks: [],
     chronicle: [],
+    soundtrack: [],
     trash: [],
     map,
     maps: [map],
@@ -360,6 +363,7 @@ export function createSampleBook(): Book {
     encyclopedia: [duskCustom],
     encyclopediaStacks: [customsStack],
     chronicle: [],
+    soundtrack: [],
     trash: [],
     map: sampleMapForLocations([
       studyLoc,
@@ -410,6 +414,7 @@ function hydrateBook(
     | "research"
     | "encyclopedia"
     | "chronicle"
+    | "soundtrack"
     | "trash"
     | "developmentalEditor"
     | "betaReaders"
@@ -419,12 +424,14 @@ function hydrateBook(
     | "activeMapId"
     | "goals"
     | "plotThreads"
+    | "manuscriptIndex"
   > & {
     characters?: Book["characters"];
     locations?: Book["locations"];
     research?: Book["research"];
     encyclopedia?: Book["encyclopedia"];
     chronicle?: Book["chronicle"];
+    soundtrack?: Book["soundtrack"];
     trash?: Book["trash"];
     developmentalEditor?: Book["developmentalEditor"];
     betaReaders?: Book["betaReaders"];
@@ -436,6 +443,7 @@ function hydrateBook(
     seriesId?: Book["seriesId"];
     goals?: Book["goals"];
     plotThreads?: Book["plotThreads"];
+    manuscriptIndex?: Book["manuscriptIndex"];
   },
 ): Book {
   return ensureBookDump(
@@ -446,35 +454,41 @@ function hydrateBook(
             ensureBookMap(
               ensureDevelopmentalEditor(
                 ensureBookTrash(
-                  ensureBookChronicle(
-                    syncEncyclopediaFromManuscript(
-                      ensureBookResearch(
-                        ensureBookEncyclopedia(
-                          ensureBookFamilyTrees(
-                            ensureBookLocations(
-                              ensureBookCharacters({
-                                ...book,
-                                seriesId: book.seriesId ?? null,
-                                plotThreads: book.plotThreads ?? [],
-                                map: book.map ?? emptyStoryMap(),
-                                maps: book.maps,
-                                activeMapId: book.activeMapId,
-                                encyclopedia: book.encyclopedia ?? [],
-                                encyclopediaStacks: book.encyclopediaStacks ?? [],
-                                chronicle: book.chronicle ?? [],
-                                familyTrees: book.familyTrees ?? [],
-                                research: book.research ?? [],
-                                chapters: book.chapters.map((c) =>
-                                  withScenes(
-                                    syncChapterTitleField({
-                                      ...c,
-                                      summary: c.summary ?? "",
-                                      notes: c.notes ?? "",
-                                      scenes: c.scenes ?? [],
-                                    }),
-                                  ),
+                  ensureBookManuscriptIndex(
+                    ensureBookSoundtrack(
+                      ensureBookChronicle(
+                        syncEncyclopediaFromManuscript(
+                          ensureBookResearch(
+                            ensureBookEncyclopedia(
+                              ensureBookFamilyTrees(
+                                ensureBookLocations(
+                                  ensureBookCharacters({
+                                    ...book,
+                                    seriesId: book.seriesId ?? null,
+                                    plotThreads: book.plotThreads ?? [],
+                                    manuscriptIndex: book.manuscriptIndex,
+                                    map: book.map ?? emptyStoryMap(),
+                                    maps: book.maps,
+                                    activeMapId: book.activeMapId,
+                                    encyclopedia: book.encyclopedia ?? [],
+                                    encyclopediaStacks: book.encyclopediaStacks ?? [],
+                                    chronicle: book.chronicle ?? [],
+                                    soundtrack: book.soundtrack ?? [],
+                                    familyTrees: book.familyTrees ?? [],
+                                    research: book.research ?? [],
+                                    chapters: book.chapters.map((c) =>
+                                      withScenes(
+                                        syncChapterTitleField({
+                                          ...c,
+                                          summary: c.summary ?? "",
+                                          notes: c.notes ?? "",
+                                          scenes: c.scenes ?? [],
+                                        }),
+                                      ),
+                                    ),
+                                  } as Book),
                                 ),
-                              } as Book),
+                              ),
                             ),
                           ),
                         ),

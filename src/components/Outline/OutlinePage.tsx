@@ -33,11 +33,11 @@ import { findScene } from "@/lib/scenes";
 import type { Scene } from "@/lib/types";
 import { readingMinutes } from "@/lib/types";
 import { formatWordCount } from "@/lib/utils";
-import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
 import {
-  populatePlotThreadsWithClaude,
-  useClaudeStatus,
-} from "@/hooks/useClaudeEnrichment";
+  ManuscriptIndexControls,
+  useManuscriptIndex,
+} from "@/components/Manuscript/ManuscriptIndexControls";
+import { indexToPlotPayload } from "@/lib/manuscriptIndex";
 
 type TimelineEntry =
   | {
@@ -86,10 +86,8 @@ export function OutlinePage() {
   const [highlightThreadId, setHighlightThreadId] = useState<string | null>(
     null,
   );
-  const [populateBusy, setPopulateBusy] = useState(false);
-  const [populateError, setPopulateError] = useState<string | null>(null);
   const [populateMessage, setPopulateMessage] = useState<string | null>(null);
-  const claudeStatus = useClaudeStatus();
+  const indexApi = useManuscriptIndex();
 
 
   const sensors = useSensors(
@@ -240,27 +238,23 @@ export function OutlinePage() {
   }
 
   async function runPopulateThreads() {
-    setPopulateBusy(true);
-    setPopulateError(null);
+    indexApi.setError(null);
     setPopulateMessage(null);
+    const index = await indexApi.ensureIndex();
+    indexApi.setPhase("applying");
     try {
-      const payload = await populatePlotThreadsWithClaude(book);
+      const payload = indexToPlotPayload(index);
       if (!payload.threads.length) {
-        setPopulateError("Claude found no clear plot threads to add.");
-        return;
+        throw new Error("No clear plot threads in the manuscript reading.");
       }
       applyPlotThreadsFromClaude(payload);
       setViewMode("tracks");
       setPopulateMessage(
-        `Added ${payload.threads.length} thread${payload.threads.length === 1 ? "" : "s"} across ${payload.assignments.length} scene${payload.assignments.length === 1 ? "" : "s"}.`,
+        `Applied ${payload.threads.length} thread${payload.threads.length === 1 ? "" : "s"} across ${payload.assignments.length} scene${payload.assignments.length === 1 ? "" : "s"}.`,
       );
       window.setTimeout(() => setPopulateMessage(null), 4200);
-    } catch (e) {
-      setPopulateError(
-        e instanceof Error ? e.message : "Could not populate threads.",
-      );
     } finally {
-      setPopulateBusy(false);
+      indexApi.setPhase("idle");
     }
   }
 
@@ -335,12 +329,10 @@ export function OutlinePage() {
         onAddChapter={() => addChapter()}
         onManageThreads={() => setThreadsOpen(true)}
         populateSlot={
-          <ClaudeDeepenButton
-            configured={claudeStatus?.configured ?? null}
-            busy={populateBusy}
-            onClick={() => void runPopulateThreads()}
-            label="Populate with Claude"
-            title="Read the manuscript and propose colored plot threads across scenes"
+          <ManuscriptIndexControls
+            api={indexApi}
+            onPopulate={runPopulateThreads}
+            populateTitle="Apply plot threads from the manuscript reading"
           />
         }
         threads={book.plotThreads ?? []}
@@ -348,13 +340,13 @@ export function OutlinePage() {
         onHighlightThreadId={setHighlightThreadId}
       />
 
-      {populateError || populateMessage ? (
+      {populateMessage || indexApi.error ? (
         <p
           className={`px-4 pb-1 font-[family-name:var(--font-ui)] text-sm sm:px-6 lg:px-10 ${
-            populateError ? "text-[#6B3A2A]" : "text-[var(--accent)]"
+            indexApi.error ? "text-[#6B3A2A]" : "text-[var(--accent)]"
           }`}
         >
-          {populateError || populateMessage}
+          {indexApi.error || populateMessage}
         </p>
       ) : null}
 

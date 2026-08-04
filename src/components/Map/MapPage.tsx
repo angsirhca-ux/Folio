@@ -26,7 +26,7 @@ import {
   RotateCcw,
   RotateCw,
   Route,
-  Sparkles,
+  Cat,
   Square,
   Type,
   Waves,
@@ -37,12 +37,13 @@ import { MapFeatureIcon } from "@/components/Map/MapFeatureIcon";
 import { MapSwitcher } from "@/components/Map/MapSwitcher";
 import { SeriesBibleStrip } from "@/components/Series/SeriesBibleStrip";
 import { Button } from "@/components/ui/button";
-import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
+import { ClarenceButton } from "@/components/Characters/ClaudeDeepenButton";
 import { useBook } from "@/providers/BookProvider";
 import {
   buildMapFromStoryWithClaude,
   useClaudeStatus,
 } from "@/hooks/useClaudeEnrichment";
+import { CLARENCE } from "@/lib/clarence";
 import {
   applyMapLayoutConnections,
 } from "@/lib/mapLayout";
@@ -1208,11 +1209,11 @@ export function MapPage() {
               Clear map
             </Button>
           ) : null}
-          <ClaudeDeepenButton
+          <ClarenceButton
             configured={claude?.configured ?? null}
             busy={layoutBusy}
-            label="Build map from story"
-            title="Read the manuscript, discover places, and place pins & terrain from story geography"
+            label={CLARENCE.buildMapLabel}
+            title={CLARENCE.buildMapTitle}
             onClick={() => void buildMapFromStory()}
             className="rounded-full"
           />
@@ -1326,7 +1327,7 @@ export function MapPage() {
             disabled={unplaced.length === 0 || layoutBusy}
             onClick={() => autoPlaceMapPins()}
           >
-            <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} />
+            <Cat className="h-3.5 w-3.5" strokeWidth={1.5} />
             Place all
           </Button>
           <Button
@@ -2175,15 +2176,15 @@ export function MapPage() {
                     disabled={layoutBusy}
                     onClick={() => autoPlaceMapPins()}
                   >
-                    <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} />
+                    <Cat className="h-3.5 w-3.5" strokeWidth={1.5} />
                     Place all
                   </Button>
                 ) : null}
-                <ClaudeDeepenButton
+                <ClarenceButton
                   configured={claude?.configured ?? null}
                   busy={layoutBusy}
-                  label="Build from story"
-                  title="Read the manuscript and lay out geography"
+                  label={CLARENCE.buildMapLabel}
+                  title={CLARENCE.buildMapTitle}
                   onClick={() => void buildMapFromStory()}
                   className="rounded-full"
                 />

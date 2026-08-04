@@ -6,6 +6,7 @@ import { ChevronDown, Loader2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
 import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
+import { CLARENCE } from "@/lib/clarence";
 import {
   BETA_CRAFT_QUESTIONS,
   latestBetaReview,
@@ -312,8 +313,7 @@ export function BetaReadersPanel({
 
                     {claude?.configured === false ? (
                       <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                        Add ANTHROPIC_API_KEY to .env.local (see env.example),
-                        then restart the server.
+                        {CLARENCE.needsKeyHint}
                       </p>
                     ) : null}
                   </motion.div>

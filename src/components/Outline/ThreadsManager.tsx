@@ -4,7 +4,10 @@ import { useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
-import { PLOT_THREAD_PALETTE } from "@/lib/plotThreads";
+import {
+  PLOT_THREAD_PALETTE,
+  PLOT_THREAD_STARTERS,
+} from "@/lib/plotThreads";
 import { cn } from "@/lib/utils";
 
 export function ThreadsManager({
@@ -16,7 +19,13 @@ export function ThreadsManager({
   onClose: () => void;
   onDeleted?: (threadId: string) => void;
 }) {
-  const { book, addPlotThread, updatePlotThread, deletePlotThread } = useBook();
+  const {
+    book,
+    addPlotThread,
+    updatePlotThread,
+    deletePlotThread,
+    applyPlotThreadStarter,
+  } = useBook();
   const threads = book.plotThreads ?? [];
   const [draftName, setDraftName] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -29,18 +38,23 @@ export function ThreadsManager({
     setConfirmId(null);
   }
 
+  function startCustom() {
+    addPlotThread({ name: draftName.trim() || "New thread" });
+    setDraftName("");
+  }
+
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-[rgba(45,42,38,0.28)] px-4 pt-[12vh]"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(45,42,38,0.28)] px-4 py-6"
       onClick={onClose}
     >
       <div
         role="dialog"
         aria-label="Manage plot threads"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--paper)] shadow-[0_24px_80px_rgba(45,42,38,0.18)]"
+        className="flex max-h-[min(88vh,42rem)] w-full max-w-lg flex-col rounded-2xl border border-[var(--border)] bg-[var(--paper)] shadow-[0_24px_80px_rgba(45,42,38,0.18)]"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
           <div>
             <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.2em] text-[var(--ink-faint)]">
               Plot threads
@@ -59,12 +73,47 @@ export function ThreadsManager({
           </button>
         </div>
 
-        <div className="folio-scroll max-h-[min(60vh,28rem)] space-y-3 px-5 py-4">
+        <div className="folio-scroll min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
           {threads.length === 0 ? (
-            <p className="py-6 text-center font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
-              No threads yet. Add romance, mystery, or any arc you want to
-              track across scenes.
-            </p>
+            <div className="space-y-3">
+              <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
+                Pick a genre pack, or start custom with your own track names.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {PLOT_THREAD_STARTERS.filter((s) => s.id !== "blank").map(
+                  (starter) => (
+                    <button
+                      key={starter.id}
+                      type="button"
+                      onClick={() => applyPlotThreadStarter(starter.id)}
+                      className="rounded-2xl border border-[rgba(45,42,38,0.1)] bg-[rgba(252,249,243,0.85)] px-3.5 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_40%,rgba(45,42,38,0.1))]"
+                    >
+                      <span className="block font-[family-name:var(--font-display)] text-base text-[var(--ink)]">
+                        {starter.label}
+                      </span>
+                      <span className="mt-1 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                        {starter.hint}
+                      </span>
+                      <span className="mt-1.5 block font-[family-name:var(--font-ui)] text-[0.65rem] leading-snug text-[var(--ink-faint)]">
+                        {starter.threads.length} tracks
+                      </span>
+                    </button>
+                  ),
+                )}
+                <button
+                  type="button"
+                  onClick={startCustom}
+                  className="rounded-2xl border border-dashed border-[rgba(45,42,38,0.18)] bg-transparent px-3.5 py-3 text-left transition-colors hover:border-[var(--accent)] hover:bg-[rgba(252,249,243,0.5)] sm:col-span-2"
+                >
+                  <span className="block font-[family-name:var(--font-display)] text-base text-[var(--ink)]">
+                    Custom
+                  </span>
+                  <span className="mt-1 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                    Skip packs — add one blank track and name your own.
+                  </span>
+                </button>
+              </div>
+            </div>
           ) : (
             threads.map((t) => {
               const confirming = confirmId === t.id;
@@ -135,9 +184,32 @@ export function ThreadsManager({
               );
             })
           )}
+
+          {threads.length > 0 ? (
+            <div className="pt-2">
+              <p className="mb-2 font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
+                Add a genre pack
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {PLOT_THREAD_STARTERS.filter((s) => s.id !== "blank").map(
+                  (starter) => (
+                    <button
+                      key={starter.id}
+                      type="button"
+                      title={starter.hint}
+                      onClick={() => applyPlotThreadStarter(starter.id)}
+                      className="rounded-full border border-[rgba(45,42,38,0.1)] px-2.5 py-1 font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--ink)]"
+                    >
+                      + {starter.label}
+                    </button>
+                  ),
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
 
-        <div className="flex items-center gap-2 border-t border-[var(--border)] px-5 py-4">
+        <div className="flex shrink-0 items-center gap-2 border-t border-[var(--border)] px-5 py-4">
           <input
             value={draftName}
             onChange={(e) => setDraftName(e.target.value)}
@@ -145,18 +217,11 @@ export function ThreadsManager({
             className="min-w-0 flex-1 rounded-lg border border-[rgba(45,42,38,0.1)] bg-[var(--sidebar)] px-3 py-2 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)] outline-none focus:border-[var(--accent)]"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
-                addPlotThread({ name: draftName || "New thread" });
-                setDraftName("");
+                startCustom();
               }
             }}
           />
-          <Button
-            size="sm"
-            onClick={() => {
-              addPlotThread({ name: draftName || "New thread" });
-              setDraftName("");
-            }}
-          >
+          <Button size="sm" onClick={startCustom}>
             <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
             Add
           </Button>

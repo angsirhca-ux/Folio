@@ -101,20 +101,17 @@ export function ThreadTracksView({
   if (threads.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 py-24">
-        <p className="max-w-sm text-center font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
-          Plot threads turn this timeline into tracks — romance, mystery, war —
-          so you can see where a strand goes quiet.
+        <p className="max-w-md text-center font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
+          Pick a genre pack to preload the tracks writers usually follow — then
+          mark scenes on the grid (or Populate with Clarence).
         </p>
         <button
           type="button"
           onClick={onManageThreads}
           className="rounded-full border border-[var(--border)] bg-[var(--paper)] px-4 py-2 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)] transition-colors hover:border-[var(--accent)]"
         >
-          Add your first thread
+          Choose a thread pack
         </button>
-        <p className="max-w-sm text-center font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-          Or use Populate with Claude in the toolbar to read the manuscript.
-        </p>
       </div>
     );
   }

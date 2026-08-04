@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
-import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
 import { DepthMeter } from "@/components/Characters/DepthMeter";
 import { EncyclopediaPanel } from "@/components/Encyclopedia/EncyclopediaPanel";
+import {
+  ManuscriptIndexControls,
+  useManuscriptIndex,
+} from "@/components/Manuscript/ManuscriptIndexControls";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
 import {
@@ -19,13 +22,8 @@ import {
   ENCYCLOPEDIA_STACK_PALETTE,
   ENCYCLOPEDIA_STACK_STARTERS,
 } from "@/lib/encyclopedia";
-import {
-  discoverEncyclopediaWithClaude,
-  enrichEncyclopediaWithClaude,
-  mergeEnrichmentIntoEncyclopedia,
-  useClaudeStatus,
-} from "@/hooks/useClaudeEnrichment";
 import type { EncyclopediaEntry } from "@/lib/types";
+import { CLARENCE } from "@/lib/clarence";
 import { cn } from "@/lib/utils";
 import { SeriesBibleStrip } from "@/components/Series/SeriesBibleStrip";
 
@@ -42,18 +40,15 @@ export function EncyclopediaPage() {
     hydrated,
     addEncyclopedia,
     upsertEncyclopedia,
-    replaceEncyclopedia,
     addEncyclopediaStack,
     updateEncyclopediaStack,
     deleteEncyclopediaStack,
     ensureEncyclopediaStack,
     applyEncyclopediaStarter,
   } = useBook();
-  const claude = useClaudeStatus();
+  const indexApi = useManuscriptIndex();
   const [search, setSearch] = useState("");
-  const [dossierBusy, setDossierBusy] = useState(false);
   const [dossierMessage, setDossierMessage] = useState<string | null>(null);
-  const [dossierError, setDossierError] = useState<string | null>(null);
   const [newStackId, setNewStackId] = useState<string>("");
   const [addingStack, setAddingStack] = useState(false);
   const [newStackName, setNewStackName] = useState("");
@@ -183,85 +178,37 @@ export function EncyclopediaPage() {
     setAddingStack(true);
   }
 
-  const runDeepenDossier = useCallback(async () => {
-    setDossierBusy(true);
-    setDossierError(null);
-    setDossierMessage("Scanning manuscript for world canon…");
-
+  async function runPopulateEncyclopedia() {
+    indexApi.setError(null);
+    setDossierMessage(null);
+    const index = await indexApi.ensureIndex();
+    indexApi.setPhase("applying");
     try {
-      const discovered = await discoverEncyclopediaWithClaude(book);
       let rosterSnapshot = [...(book.encyclopedia ?? [])];
       const created: EncyclopediaEntry[] = [];
-
-      for (const d of discovered) {
+      for (const d of index.encyclopedia ?? []) {
         if (findEncyclopediaByTitle(rosterSnapshot, d.title)) continue;
-        const stackId = ensureEncyclopediaStack(
-          d.stackName?.trim() || "General",
-        );
+        const stackId = ensureEncyclopediaStack(d.stackName || "General");
         const next = createEncyclopediaEntry({
           title: d.title,
           stackId,
           shortBio: d.shortBio ?? "",
-          tags: ["from-story", "claude"],
+          tags: ["from-story", "clarence"],
         });
         created.push(next);
         rosterSnapshot.push(next);
       }
-
-      if (created.length) {
-        upsertEncyclopedia(created);
-        setDossierMessage(
-          `Added ${created.length}. Deepening ${rosterSnapshot.length}…`,
-        );
-      } else {
-        setDossierMessage(`Deepening ${rosterSnapshot.length}…`);
-      }
-
-      let enriched = 0;
-      for (let i = 0; i < rosterSnapshot.length; i++) {
-        const target = rosterSnapshot[i];
-        setDossierMessage(`Deepening ${i + 1} of ${rosterSnapshot.length}…`);
-        try {
-          const enrichment = await enrichEncyclopediaWithClaude(
-            { ...book, encyclopedia: rosterSnapshot },
-            target.id,
-          );
-          let merged = mergeEnrichmentIntoEncyclopedia(
-            target,
-            enrichment,
-            rosterSnapshot,
-          );
-          if (enrichment.stackName?.trim()) {
-            const stackId = ensureEncyclopediaStack(enrichment.stackName);
-            merged = { ...merged, stackId };
-          }
-          replaceEncyclopedia(merged);
-          rosterSnapshot = rosterSnapshot.map((e) =>
-            e.id === merged.id ? merged : e,
-          );
-          enriched += 1;
-        } catch {
-          // continue
-        }
-      }
-
+      if (created.length) upsertEncyclopedia(created);
       setDossierMessage(
-        `Done — ${enriched} deepened${created.length ? `, ${created.length} added` : ""}.`,
+        created.length
+          ? `Added ${created.length} from the manuscript reading. Open a card to deepen.`
+          : "No new encyclopedia entries — reading is up to date. Open a card to deepen.",
       );
-    } catch (e) {
-      setDossierError(
-        e instanceof Error ? e.message : "Encyclopedia deepen failed.",
-      );
-      setDossierMessage(null);
+      window.setTimeout(() => setDossierMessage(null), 5000);
     } finally {
-      setDossierBusy(false);
+      indexApi.setPhase("idle");
     }
-  }, [
-    book,
-    upsertEncyclopedia,
-    replaceEncyclopedia,
-    ensureEncyclopediaStack,
-  ]);
+  }
 
   if (!hydrated) {
     return (
@@ -305,21 +252,16 @@ export function EncyclopediaPage() {
             without leaving the shelf. Characters and places stay in their own
             tabs; Research holds outside sources.
           </p>
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <ClaudeDeepenButton
-              configured={claude?.configured ?? null}
-              busy={dossierBusy}
-              label="Deepen encyclopedia with Claude"
-              onClick={() => void runDeepenDossier()}
+          <div className="mt-6 flex flex-col gap-2">
+            <ManuscriptIndexControls
+              api={indexApi}
+              onPopulate={runPopulateEncyclopedia}
+              populateLabel={CLARENCE.populateLabel}
+              populateTitle="Add encyclopedia entries from the manuscript reading"
             />
             {dossierMessage ? (
               <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
                 {dossierMessage}
-              </span>
-            ) : null}
-            {dossierError ? (
-              <span className="font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
-                {dossierError}
               </span>
             ) : null}
           </div>

@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
 import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
+import { CLARENCE } from "@/lib/clarence";
 import {
   appendPrivateNote,
   formatTryNextPin,
@@ -542,8 +543,7 @@ export function DevelopmentalPanel({
 
                     {claude?.configured === false ? (
                       <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                        Add ANTHROPIC_API_KEY to .env.local (see env.example),
-                        then restart the server.
+                        {CLARENCE.needsKeyHint}
                       </p>
                     ) : null}
                   </motion.div>
@@ -971,7 +971,7 @@ function PassButton({
       disabled={disabled}
       title={
         configured === false
-          ? "Add ANTHROPIC_API_KEY to .env.local"
+          ? CLARENCE.needsKey
           : meta.blurb
       }
       className={cn(
@@ -997,7 +997,7 @@ function PassButton({
         </span>
         <span className="mt-0.5 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-faint)]">
           {busy
-            ? "Claude is drafting flags — keep this panel open."
+            ? CLARENCE.draftingFlags
             : meta.blurb}
         </span>
       </span>

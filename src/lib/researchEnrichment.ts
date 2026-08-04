@@ -281,7 +281,7 @@ export function applyResearchEnrichment(
   if (payload.sources?.length) {
     const sources =
       mode === "deepen"
-        ? next.sources.filter((s) => !s.notes.includes("(Claude)"))
+        ? next.sources.filter((s) => !s.notes.includes("(Clarence)") && !s.notes.includes("(Claude)"))
         : [...next.sources];
     for (const s of payload.sources) {
       if (!s.title?.trim()) continue;
@@ -291,7 +291,7 @@ export function applyResearchEnrichment(
           title: s.title.trim(),
           citation: s.citation ?? "",
           quote: s.quote ?? "",
-          notes: s.notes?.trim() || "From manuscript (Claude)",
+          notes: s.notes?.trim() || "From manuscript (Clarence)",
         }),
       );
     }
@@ -301,7 +301,7 @@ export function applyResearchEnrichment(
   if (payload.links?.length) {
     const links =
       mode === "deepen"
-        ? next.links.filter((l) => !l.notes.includes("(Claude)"))
+        ? next.links.filter((l) => !l.notes.includes("(Clarence)") && !l.notes.includes("(Claude)"))
         : [...next.links];
     for (const r of payload.links) {
       if (!r.toTitle?.trim() || !r.label?.trim()) continue;
@@ -322,7 +322,7 @@ export function applyResearchEnrichment(
           toEntryId: linked?.id ?? "",
           toTitle: linked?.title ?? r.toTitle.trim(),
           label: r.label.trim(),
-          notes: r.notes?.trim() || "Linked by Claude",
+          notes: r.notes?.trim() || "Linked by Clarence",
         }),
       );
     }

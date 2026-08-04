@@ -1,11 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Plus, Search, X } from "lucide-react";
-import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
+import {
+  ManuscriptIndexControls,
+  useManuscriptIndex,
+} from "@/components/Manuscript/ManuscriptIndexControls";
 import { DepthMeter } from "@/components/Characters/DepthMeter";
 import { FamilyTreesView } from "@/components/Characters/FamilyTreesView";
 import { SeriesBibleStrip } from "@/components/Series/SeriesBibleStrip";
@@ -19,17 +22,12 @@ import {
   findCharacterByName,
 } from "@/lib/characters";
 import {
-  discoverCastWithClaude,
-  enrichCharacterWithClaude,
-  mergeEnrichmentIntoCharacter,
-  useClaudeStatus,
-} from "@/hooks/useClaudeEnrichment";
-import {
   CHARACTER_ROLE_META,
   povColor,
   type Character,
   type CharacterRole,
 } from "@/lib/types";
+import { CLARENCE } from "@/lib/clarence";
 import { cn } from "@/lib/utils";
 
 type SortMode = "story" | "name" | "depth" | "role";
@@ -39,16 +37,13 @@ const DEPTH_RANK = { stub: 0, sketch: 1, portrait: 2, living: 3 } as const;
 
 export function CharactersPage() {
   const router = useRouter();
-  const { book, hydrated, addCharacter, upsertCharacters, replaceCharacter } =
-    useBook();
-  const claude = useClaudeStatus();
+  const { book, hydrated, addCharacter, upsertCharacters } = useBook();
+  const indexApi = useManuscriptIndex();
   const [view, setView] = useState<CastView>("roster");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>("story");
   const [roleFilter, setRoleFilter] = useState<CharacterRole | "all">("all");
-  const [castBusy, setCastBusy] = useState(false);
   const [castMessage, setCastMessage] = useState<string | null>(null);
-  const [castError, setCastError] = useState<string | null>(null);
 
   const characters = book.characters ?? [];
 
@@ -111,71 +106,36 @@ export function CharactersPage() {
     router.push(`/characters/${id}`);
   }
 
-  const runDeepenCast = useCallback(async () => {
-    setCastBusy(true);
-    setCastError(null);
-    setCastMessage("Scanning manuscript for cast…");
-
+  async function runPopulateCast() {
+    indexApi.setError(null);
+    setCastMessage(null);
+    const index = await indexApi.ensureIndex();
+    indexApi.setPhase("applying");
     try {
-      const discovered = await discoverCastWithClaude(book);
       let rosterSnapshot = [...(book.characters ?? [])];
       const created: Character[] = [];
-
-      for (const d of discovered) {
+      for (const d of index.characters ?? []) {
         if (findCharacterByName(rosterSnapshot, d.name)) continue;
         const next = createCharacter({
           name: d.name,
           role: d.role ?? "unspecified",
           shortBio: d.shortBio ?? "",
-          tags: ["from-story", "claude"],
+          tags: ["from-story", "clarence"],
         });
         created.push(next);
         rosterSnapshot.push(next);
       }
-
-      if (created.length) {
-        upsertCharacters(created);
-        setCastMessage(
-          `Added ${created.length}. Deepening ${rosterSnapshot.length}…`,
-        );
-      } else {
-        setCastMessage(`Deepening ${rosterSnapshot.length}…`);
-      }
-
-      let enriched = 0;
-      for (let i = 0; i < rosterSnapshot.length; i++) {
-        const target = rosterSnapshot[i];
-        setCastMessage(`Deepening ${i + 1} of ${rosterSnapshot.length}…`);
-        try {
-          const enrichment = await enrichCharacterWithClaude(
-            { ...book, characters: rosterSnapshot },
-            target.id,
-          );
-          const merged = mergeEnrichmentIntoCharacter(
-            target,
-            enrichment,
-            rosterSnapshot,
-          );
-          replaceCharacter(merged);
-          rosterSnapshot = rosterSnapshot.map((c) =>
-            c.id === merged.id ? merged : c,
-          );
-          enriched += 1;
-        } catch {
-          // keep going through the cast
-        }
-      }
-
+      if (created.length) upsertCharacters(created);
       setCastMessage(
-        `Done — ${enriched} deepened${created.length ? `, ${created.length} added` : ""}.`,
+        created.length
+          ? `Added ${created.length} from the manuscript reading. Open a card to deepen.`
+          : "No new cast names — reading is up to date. Open a card to deepen.",
       );
-    } catch (e) {
-      setCastError(e instanceof Error ? e.message : "Cast deepen failed.");
-      setCastMessage(null);
+      window.setTimeout(() => setCastMessage(null), 5000);
     } finally {
-      setCastBusy(false);
+      indexApi.setPhase("idle");
     }
-  }, [book, upsertCharacters, replaceCharacter]);
+  }
 
   if (!hydrated) {
     return (
@@ -203,7 +163,7 @@ export function CharactersPage() {
         </h1>
         <p className="mt-4 max-w-xl font-[family-name:var(--font-ui)] text-base leading-relaxed text-[var(--ink-muted)]">
           {view === "roster"
-            ? "Cast pages grow from the manuscript. Use Claude to read the prose and fill empty wiki fields — voice, wants, appearance — without overwriting what you&apos;ve written by hand."
+            ? "Cast pages grow from the manuscript. Use Clarence to read the prose and fill empty wiki fields — voice, wants, appearance — without overwriting what you&apos;ve written by hand."
             : "Chart family lines and partnerships. Make as many trees as you need — houses, clans, or bloodlines."}
         </p>
 
@@ -236,26 +196,16 @@ export function CharactersPage() {
         </div>
 
         {view === "roster" ? (
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <ClaudeDeepenButton
-              configured={claude?.configured ?? null}
-              busy={castBusy}
-              label="Deepen cast with Claude"
-              onClick={() => void runDeepenCast()}
+          <div className="mt-6 flex flex-col gap-2">
+            <ManuscriptIndexControls
+              api={indexApi}
+              onPopulate={runPopulateCast}
+              populateLabel={CLARENCE.populateLabel}
+              populateTitle="Add named people from the manuscript reading"
             />
             {castMessage ? (
               <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
                 {castMessage}
-              </span>
-            ) : null}
-            {castError ? (
-              <span className="font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
-                {castError}
-              </span>
-            ) : null}
-            {claude?.configured === false ? (
-              <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                Set ANTHROPIC_API_KEY in .env.local (see env.example)
               </span>
             ) : null}
           </div>
@@ -456,7 +406,7 @@ function EmptyCast({
       <p className="mx-auto mt-3 max-w-sm font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
         {hasSearch
           ? "Try another search, or add a new character."
-          : "Add someone the moment they walk onstage — or deepen the cast from the manuscript with Claude."}
+          : "Add someone the moment they walk onstage — or deepen the cast from the manuscript with Clarence."}
       </p>
       {!hasSearch ? (
         <Button className="mt-8 gap-1.5 rounded-full" onClick={onCreate}>

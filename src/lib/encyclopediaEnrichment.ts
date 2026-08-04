@@ -283,7 +283,7 @@ export function applyEncyclopediaEnrichment(
   if (payload.links?.length) {
     const links =
       mode === "deepen"
-        ? next.links.filter((l) => !l.notes.includes("(Claude)"))
+        ? next.links.filter((l) => !l.notes.includes("(Clarence)") && !l.notes.includes("(Claude)"))
         : [...next.links];
     for (const r of payload.links) {
       if (!r.toTitle?.trim() || !r.label?.trim()) continue;
@@ -304,7 +304,7 @@ export function applyEncyclopediaEnrichment(
           toEntryId: linked?.id ?? "",
           toTitle: linked?.title ?? r.toTitle.trim(),
           label: r.label.trim(),
-          notes: r.notes?.trim() || "Linked by Claude",
+          notes: r.notes?.trim() || "Linked by Clarence",
         }),
       );
     }

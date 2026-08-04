@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
 import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
+import { CLARENCE } from "@/lib/clarence";
 import {
   SMART_CRITIQUE_PACK,
   groupCritiqueItems,
@@ -327,8 +328,7 @@ export function CritiquePanel({
 
                     {claude?.configured === false ? (
                       <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                        Add ANTHROPIC_API_KEY to .env.local (see env.example),
-                        then restart the server.
+                        {CLARENCE.needsKeyHint}
                       </p>
                     ) : null}
                   </motion.div>

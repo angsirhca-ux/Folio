@@ -342,6 +342,20 @@ export interface ChronicleEvent {
   updatedAt: number;
 }
 
+/** A track on the novel’s listening playlist — fun, not canon. */
+export interface SoundtrackSong {
+  id: string;
+  title: string;
+  artist: string;
+  /** Why it fits the book — mood, character, or arc beat. */
+  note: string;
+  /** Freeform slot — Opening, Midpoint, Finale, Credits… */
+  placement: string;
+  order: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Scene {
   id: string;
   title: string;
@@ -465,6 +479,57 @@ export interface PlotThread {
   updatedAt: number;
 }
 
+/**
+ * Structured findings from one full Claude manuscript read.
+ * Populate buttons apply slices; Reread refreshes when the book moves on.
+ */
+export interface ManuscriptIndexData {
+  generatedAt: number;
+  sourceHash: string;
+  characters: Array<{
+    name: string;
+    role?: CharacterRole;
+    shortBio?: string;
+    evidence?: string;
+  }>;
+  locations: Array<{
+    name: string;
+    kind?: LocationKind;
+    shortBio?: string;
+    evidence?: string;
+  }>;
+  research: Array<{
+    title: string;
+    kind?: ResearchKind;
+    shortBio?: string;
+    evidence?: string;
+  }>;
+  encyclopedia: Array<{
+    title: string;
+    stackName?: string;
+    shortBio?: string;
+    evidence?: string;
+  }>;
+  chronicle: Array<{
+    title: string;
+    whenLabel?: string;
+    summary?: string;
+    order?: number;
+    linkedCharacterNames?: string[];
+    linkedLocationNames?: string[];
+    linkedEntryTitles?: string[];
+  }>;
+  plotThreads: Array<{
+    name: string;
+    color?: string;
+    summary?: string;
+  }>;
+  plotAssignments: Array<{
+    sceneId: string;
+    threadNames: string[];
+  }>;
+}
+
 export interface FolioLibrary {
   version: 1;
   activeBookId: string;
@@ -491,6 +556,8 @@ export interface Book {
   encyclopediaStacks: EncyclopediaStack[];
   /** World history events (lore chronicle — not plot Timeline). */
   chronicle: ChronicleEvent[];
+  /** Listening playlist for the novel — Claude or author curated. */
+  soundtrack: SoundtrackSong[];
   /**
    * All story maps for this book (London streets, fantasy continent, …).
    * One is active at a time via `activeMapId`.
@@ -527,6 +594,11 @@ export interface Book {
   dump: DumpState;
   /** Named plot threads for the Timeline tracks view. */
   plotThreads: PlotThread[];
+  /**
+   * Shared Claude reading of the manuscript — populate bible surfaces from
+   * this instead of re-reading on every click. Stale when sourceHash diverges.
+   */
+  manuscriptIndex?: ManuscriptIndexData;
   /** Optional link to a library series bible. */
   seriesId?: string | null;
   /** Daily / manuscript goals and day log. */

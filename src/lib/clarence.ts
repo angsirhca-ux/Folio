@@ -1,0 +1,28 @@
+/** Folio’s house reader — the face of AI help. Not Anthropic’s brand. */
+export const CLARENCE = {
+  name: "Clarence",
+  /** Default wiki deepen CTA */
+  deepenLabel: "Ask Clarence",
+  deepenTitle:
+    "Clarence reads the manuscript and fills empty fields — he won’t overwrite what you wrote by hand",
+  populateLabel: "Ask Clarence to populate",
+  populateTitle:
+    "Clarence applies seeds from his manuscript reading to this shelf",
+  composeSoundtrackLabel: "Compose with Clarence",
+  composeSoundtrackTitle:
+    "Clarence builds a fifteen-song soundtrack from his manuscript reading",
+  rereadLabel: "Ask Clarence to reread",
+  rereadTitle: "Force a fresh full manuscript reading",
+  reading: "Clarence is reading…",
+  readingFull: "Clarence is reading the manuscript…",
+  applying: "Clarence is applying…",
+  unavailable: "Clarence is offline",
+  needsKey:
+    "Clarence needs an API key — add ANTHROPIC_API_KEY to .env.local",
+  needsKeyHint:
+    "Clarence needs an API key — add ANTHROPIC_API_KEY to .env.local (see env.example), then restart the server.",
+  draftingFlags: "Clarence is drafting flags — keep this panel open.",
+  buildMapLabel: "Ask Clarence to map it",
+  buildMapTitle:
+    "Clarence reads the story, finds places, and lays out the corkboard",
+} as const;

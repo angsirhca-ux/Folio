@@ -446,7 +446,7 @@ export function applyCharacterEnrichment(
   if (payload.relationships?.length) {
     const rels =
       mode === "deepen"
-        ? next.relationships.filter((r) => !r.notes.includes("(Claude)"))
+        ? next.relationships.filter((r) => !r.notes.includes("(Clarence)") && !r.notes.includes("(Claude)"))
         : [...next.relationships];
     for (const r of payload.relationships) {
       if (!r.toName?.trim() || !r.label?.trim()) continue;
@@ -470,7 +470,7 @@ export function applyCharacterEnrichment(
           toName: linked?.name ?? r.toName.trim(),
           label: r.label.trim(),
           notes: (
-            r.notes?.trim() || "Inferred from the manuscript (Claude)"
+            r.notes?.trim() || "Inferred from the manuscript (Clarence)"
           ).slice(0, 400),
         }),
       );

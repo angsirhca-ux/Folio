@@ -12,7 +12,7 @@ import {
   StickyNote,
   ScrollText,
   BookMarked,
-  Sparkles,
+  Cat,
   Tags,
   Users,
   ClipboardCheck,
@@ -399,9 +399,9 @@ export function WritingApp() {
             setEditorOpen(true);
           }}
           className={hasEditorFlags || editorOpen ? "text-[var(--accent)]" : ""}
-          title="Developmental editor — flags only, never rewrites"
+          title="Developmental editor — Clarence flags only, never rewrites"
         >
-          <Sparkles className="h-4 w-4" strokeWidth={1.5} />
+          <Cat className="h-4 w-4" strokeWidth={1.5} />
         </Button>
         <Button
           variant="ghost"
