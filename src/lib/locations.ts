@@ -150,6 +150,8 @@ export interface LocationAppearance {
   scene: Scene;
   sceneIndex: number;
   tagged: boolean;
+  viaProse: boolean;
+  matchedAs?: string;
 }
 
 export function locationAppearances(
@@ -157,17 +159,28 @@ export function locationAppearances(
   location: Location,
 ): LocationAppearance[] {
   const out: LocationAppearance[] = [];
+  const forms = [location.name, ...location.aliases]
+    .map((n) => n.trim())
+    .filter((n) => n.length >= 2)
+    .sort((a, b) => b.length - a.length);
+
   chapters.forEach((chapter, chapterIndex) => {
     const parts = getSceneHtmlParts(chapter.content);
     (chapter.scenes ?? []).forEach((scene, sceneIndex) => {
       const tagged = locationMatchesName(location, scene.location);
       const prose = scenePlainText(parts[sceneIndex] ?? "");
-      const inProse =
-        !tagged &&
-        [location.name, ...location.aliases].some((n) =>
-          nameMentionedInText(prose, n),
-        );
-      if (tagged || inProse) {
+      let viaProse = false;
+      let matchedAs: string | undefined;
+      if (!tagged) {
+        for (const n of forms) {
+          if (nameMentionedInText(prose, n)) {
+            viaProse = true;
+            matchedAs = n;
+            break;
+          }
+        }
+      }
+      if (tagged || viaProse) {
         out.push({
           chapterId: chapter.id,
           chapterTitle: chapter.title,
@@ -175,6 +188,8 @@ export function locationAppearances(
           scene,
           sceneIndex,
           tagged,
+          viaProse,
+          matchedAs,
         });
       }
     });

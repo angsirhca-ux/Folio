@@ -243,14 +243,21 @@ export function OutlinePage() {
     const index = await indexApi.ensureIndex();
     indexApi.setPhase("applying");
     try {
+      const existingCount = (book.plotThreads ?? []).length;
       const payload = indexToPlotPayload(index);
-      if (!payload.threads.length) {
+      if (!payload.threads.length && !payload.assignments.length) {
+        throw new Error("No clear plot threads in the manuscript reading.");
+      }
+      // Starter / hand-made tracks: still apply if we only got assignments.
+      if (!payload.threads.length && existingCount === 0) {
         throw new Error("No clear plot threads in the manuscript reading.");
       }
       applyPlotThreadsFromClaude(payload);
       setViewMode("tracks");
       setPopulateMessage(
-        `Applied ${payload.threads.length} thread${payload.threads.length === 1 ? "" : "s"} across ${payload.assignments.length} scene${payload.assignments.length === 1 ? "" : "s"}.`,
+        existingCount > 0
+          ? `Assigned scenes onto your ${existingCount} track${existingCount === 1 ? "" : "s"} (${payload.assignments.length} scene${payload.assignments.length === 1 ? "" : "s"}).`
+          : `Applied ${payload.threads.length} thread${payload.threads.length === 1 ? "" : "s"} across ${payload.assignments.length} scene${payload.assignments.length === 1 ? "" : "s"}.`,
       );
       window.setTimeout(() => setPopulateMessage(null), 4200);
     } finally {

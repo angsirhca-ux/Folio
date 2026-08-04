@@ -30,6 +30,7 @@ import {
 } from "@/lib/types";
 import { ContinuityNotesSection } from "@/components/Bible/ContinuityNotesSection";
 import { MembershipChecklist } from "@/components/Bible/MembershipChecklist";
+import { NameContinuityPanel } from "@/components/Bible/NameContinuityPanel";
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
@@ -613,10 +614,23 @@ export function CharacterWikiPage({ characterId }: { characterId: string }) {
           </WikiSection>
 
           <WikiSection id="appearances" title="On the page" index={7}>
-            <AppearancesRail
-              appearances={appearances}
+            <NameContinuityPanel
+              book={book}
+              name={character.name}
+              aliases={character.aliases ?? []}
+              entityKind="character"
+              entityId={character.id}
               onOpenScene={focusScene}
             />
+            <div className="mt-10 border-t border-[rgba(45,42,38,0.08)] pt-8">
+              <p className="mb-4 font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+                Scene timeline
+              </p>
+              <AppearancesRail
+                appearances={appearances}
+                onOpenScene={focusScene}
+              />
+            </div>
           </WikiSection>
         </article>
       </div>

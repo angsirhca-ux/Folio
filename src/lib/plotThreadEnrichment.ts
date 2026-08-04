@@ -46,20 +46,20 @@ export const PLOT_THREAD_DISCOVER_TOOL_NAME = "save_plot_threads";
 export const discoverPlotThreadsTool = {
   name: PLOT_THREAD_DISCOVER_TOOL_NAME,
   description:
-    "Propose named plot threads (subplots / arcs) for a novel timeline and assign which scenes touch each thread.",
+    "Assign scenes to plot threads on a novel timeline. If the book already lists threads, use those exact names only — do not invent new tracks.",
   input_schema: {
     type: "object" as const,
     properties: {
       threads: {
         type: "array",
         description:
-          "3–8 distinct plot threads (main conflict, romance, mystery, character arc, etc.). Prefer fewer sharp threads over many vague ones.",
+          "When existing threads are listed in the prompt, echo those exact names (optional short summaries). When none exist, propose 3–8 distinct threads.",
         items: {
           type: "object",
           properties: {
             name: {
               type: "string",
-              description: "Short track label — e.g. Romance, Inheritance, War.",
+              description: "Short track label — must match locked names when provided.",
             },
             color: {
               type: "string",
@@ -77,7 +77,7 @@ export const discoverPlotThreadsTool = {
       assignments: {
         type: "array",
         description:
-          "For each scene that meaningfully advances one or more threads, list sceneId and thread names (exact names from threads).",
+          "For each scene that meaningfully advances one or more threads, list sceneId and thread names (exact names from threads / locked list).",
         items: {
           type: "object",
           properties: {
@@ -102,14 +102,25 @@ export const discoverPlotThreadsTool = {
 export function buildPlotThreadDiscoveryContext(
   book: Pick<Book, "title" | "chapters" | "plotThreads">,
 ): string {
+  const existingList = book.plotThreads ?? [];
   const existing =
-    (book.plotThreads ?? []).map((t) => t.name).join(", ") || "(none)";
+    existingList.map((t) => t.name).join(", ") || "(none)";
+  const lockNote =
+    existingList.length > 0
+      ? [
+          `LOCKED THREADS — use ONLY these exact names in threads[] and assignments.threadNames: ${existing}.`,
+          `Do not invent new thread names. Assign scenes onto these tracks. You may return the same names with short summaries.`,
+        ].join("\n")
+      : [
+          `No tracks yet — propose 3–8 distinct plot threads (subplots/arcs), pick palette colors, and mark which scenes advance each.`,
+        ].join("\n");
+
   const preamble = [
     `Manuscript: ${book.title || "Untitled"}`,
     `Chapters: ${book.chapters.length}`,
     `Existing plot threads: ${existing}`,
+    lockNote,
     `Each scene block includes sceneId — use those exact ids in assignments.`,
-    `Propose distinct narrative threads (subplots/arcs), pick palette colors, and mark which scenes advance each thread.`,
     `Do not invent scenes. Prefer evidence from prose, synopsis, and labels.`,
     "",
     "Scenes:",
@@ -160,10 +171,64 @@ function normalizeHex(color: string | undefined, index: number): string {
   return PLOT_THREAD_PALETTE[index % PLOT_THREAD_PALETTE.length];
 }
 
+/** Collapse punctuation so “Hero’s arc” ≈ “Heros arc” ≈ “Hero arc”. */
+export function normalizeThreadKey(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
- * Merge Claude threads into the book: reuse same-named threads, add new ones,
- * and set scene threadIds from assignments (union with any threads not in the
- * Claude set so manual strands are preserved).
+ * Map a Clarence / freeform label onto an existing track name.
+ * Exact → contains → shared tokens. Returns the canonical existing name.
+ */
+export function matchExistingThreadName(
+  query: string,
+  existingNames: string[],
+): string | null {
+  const q = normalizeThreadKey(query);
+  if (!q || existingNames.length === 0) return null;
+
+  for (const name of existingNames) {
+    if (normalizeThreadKey(name) === q) return name;
+  }
+
+  for (const name of existingNames) {
+    const ck = normalizeThreadKey(name);
+    if (ck.length < 4 || q.length < 4) continue;
+    if (ck.includes(q) || q.includes(ck)) return name;
+  }
+
+  const qTokens = q.split(" ").filter((t) => t.length > 2);
+  if (qTokens.length === 0) return null;
+  let best: string | null = null;
+  let bestScore = 0;
+  for (const name of existingNames) {
+    const cTokens = normalizeThreadKey(name)
+      .split(" ")
+      .filter((t) => t.length > 2);
+    if (cTokens.length === 0) continue;
+    const overlap = cTokens.filter((t) => qTokens.includes(t)).length;
+    if (overlap === 0) continue;
+    const score = overlap / Math.max(cTokens.length, qTokens.length);
+    if (score > bestScore && score >= 0.45) {
+      bestScore = score;
+      best = name;
+    }
+  }
+  return best;
+}
+
+/**
+ * Merge Clarence threads into the book.
+ * When the book already has tracks (starter pack or hand-made), lock to those:
+ * assign scenes onto them — do not invent parallel threads.
+ * Only create new threads when the book has none yet.
  */
 export function applyPlotThreadDiscovery(
   book: Book,
@@ -176,51 +241,90 @@ export function applyPlotThreadDiscovery(
       summary: t.summary?.trim() ?? "",
     }))
     .filter((t) => t.name.length > 1)
-    .slice(0, 10);
-
-  if (incoming.length === 0) return book;
+    .slice(0, 12);
 
   const existing = [...(book.plotThreads ?? [])];
+  const lockToExisting = existing.length > 0;
+
+  if (incoming.length === 0 && lockToExisting) {
+    // Assignments-only payload still useful
+  } else if (incoming.length === 0) {
+    return book;
+  }
+
+  const existingNames = existing.map((t) => t.name);
   const nameToId = new Map(
-    existing.map((t) => [t.name.trim().toLowerCase(), t.id]),
+    existing.map((t) => [normalizeThreadKey(t.name), t.id]),
   );
   const nextThreads: PlotThread[] = [...existing];
 
-  incoming.forEach((t, i) => {
-    const key = t.name.toLowerCase();
-    const color = normalizeHex(t.color, nextThreads.length + i);
-    const foundId = nameToId.get(key);
-    if (foundId) {
-      const idx = nextThreads.findIndex((x) => x.id === foundId);
-      if (idx >= 0) {
-        nextThreads[idx] = {
-          ...nextThreads[idx],
-          color,
-          updatedAt: Date.now(),
-        };
+  if (!lockToExisting) {
+    incoming.forEach((t, i) => {
+      const key = normalizeThreadKey(t.name);
+      const foundId = nameToId.get(key);
+      const color = normalizeHex(t.color, nextThreads.length + i);
+      if (foundId) {
+        const idx = nextThreads.findIndex((x) => x.id === foundId);
+        if (idx >= 0) {
+          nextThreads[idx] = {
+            ...nextThreads[idx],
+            color,
+            updatedAt: Date.now(),
+          };
+        }
+      } else {
+        const thread = createPlotThread(
+          { name: t.name, color },
+          nextThreads.length,
+        );
+        nextThreads.push(thread);
+        nameToId.set(key, thread.id);
       }
-    } else {
-      const thread = createPlotThread(
-        { name: t.name, color },
-        nextThreads.length,
-      );
-      nextThreads.push(thread);
-      nameToId.set(key, thread.id);
+    });
+  } else {
+    // Refresh colors on fuzzy-matched existing tracks; never add new ones.
+    for (const t of incoming) {
+      const matched = matchExistingThreadName(t.name, existingNames);
+      if (!matched) continue;
+      const key = normalizeThreadKey(matched);
+      const foundId = nameToId.get(key);
+      if (!foundId) continue;
+      const idx = nextThreads.findIndex((x) => x.id === foundId);
+      if (idx < 0) continue;
+      const color = normalizeHex(t.color, idx);
+      nextThreads[idx] = {
+        ...nextThreads[idx],
+        color,
+        updatedAt: Date.now(),
+      };
     }
-  });
+  }
 
-  const claudeThreadIds = new Set(
-    incoming
-      .map((t) => nameToId.get(t.name.toLowerCase()))
-      .filter((id): id is string => Boolean(id)),
-  );
+  const resolveNameToId = (raw: string): string | undefined => {
+    const exact = nameToId.get(normalizeThreadKey(raw));
+    if (exact) return exact;
+    if (!lockToExisting) return undefined;
+    const matched = matchExistingThreadName(raw, existingNames);
+    if (!matched) return undefined;
+    return nameToId.get(normalizeThreadKey(matched));
+  };
+
+  const claudeThreadIds = new Set<string>();
+  if (lockToExisting) {
+    for (const t of nextThreads) claudeThreadIds.add(t.id);
+  } else {
+    for (const t of incoming) {
+      const id = nameToId.get(normalizeThreadKey(t.name));
+      if (id) claudeThreadIds.add(id);
+    }
+  }
 
   const assignmentMap = new Map<string, string[]>();
   for (const a of payload.assignments ?? []) {
     const sceneId = a.sceneId?.trim();
     if (!sceneId) continue;
     const ids = (a.threadNames ?? [])
-      .map((n) => nameToId.get(n.trim().toLowerCase()))
+      .map((n) => resolveNameToId(n.trim()))
       .filter((id): id is string => Boolean(id));
     if (ids.length) assignmentMap.set(sceneId, [...new Set(ids)]);
   }
@@ -243,7 +347,6 @@ export function applyPlotThreadDiscovery(
     }),
   }));
 
-  // Scenes without Claude assignments keep their existing threadIds.
   return {
     ...book,
     plotThreads: nextThreads,

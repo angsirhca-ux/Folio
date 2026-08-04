@@ -13,6 +13,10 @@ import type {
   DiscoveredThreadAssignment,
   PlotThreadDiscoverPayload,
 } from "./plotThreadEnrichment";
+import {
+  matchExistingThreadName,
+  normalizeThreadKey,
+} from "./plotThreadEnrichment";
 import { getSceneHtmlParts } from "./manuscriptScenes";
 import {
   MANUSCRIPT_CONTEXT_BUDGET,
@@ -231,7 +235,10 @@ export function manuscriptSourceHash(chapters: Chapter[]): string {
   return (h >>> 0).toString(16).padStart(8, "0");
 }
 
-export function emptyManuscriptIndex(sourceHash: string): ManuscriptIndex {
+export function emptyManuscriptIndex(
+  sourceHash: string,
+  seed?: { plotThreads?: DiscoveredPlotThread[] },
+): ManuscriptIndex {
   return {
     generatedAt: Date.now(),
     sourceHash,
@@ -240,7 +247,14 @@ export function emptyManuscriptIndex(sourceHash: string): ManuscriptIndex {
     research: [],
     encyclopedia: [],
     chronicle: [],
-    plotThreads: [],
+    plotThreads: (seed?.plotThreads ?? [])
+      .map((t) => ({
+        name: t.name?.trim() ?? "",
+        color: t.color,
+        summary: t.summary?.trim() ?? "",
+      }))
+      .filter((t) => t.name.length > 1)
+      .slice(0, 12),
     plotAssignments: [],
   };
 }
@@ -401,13 +415,35 @@ export function mergeManuscriptIndexSlice(
   }
 
   const plotThreads = [...acc.plotThreads];
-  const threadKeys = new Set(plotThreads.map((t) => normKey(t.name)));
+  const lockedNames = plotThreads.map((t) => t.name);
+  const lockThreads = lockedNames.length > 0;
+  const threadKeys = new Set(plotThreads.map((t) => normalizeThreadKey(t.name)));
+
   for (const t of part.plotThreads ?? []) {
     const name = t.name?.trim() ?? "";
     if (name.length < 2) continue;
-    const key = normKey(name);
+
+    if (lockThreads) {
+      const matched = matchExistingThreadName(name, lockedNames);
+      if (!matched) continue;
+      const i = plotThreads.findIndex(
+        (x) => normalizeThreadKey(x.name) === normalizeThreadKey(matched),
+      );
+      if (i >= 0) {
+        plotThreads[i] = {
+          ...plotThreads[i],
+          color: t.color ?? plotThreads[i].color,
+          summary: t.summary?.trim() || plotThreads[i].summary,
+        };
+      }
+      continue;
+    }
+
+    const key = normalizeThreadKey(name);
     if (threadKeys.has(key)) {
-      const i = plotThreads.findIndex((x) => normKey(x.name) === key);
+      const i = plotThreads.findIndex(
+        (x) => normalizeThreadKey(x.name) === key,
+      );
       if (i >= 0) {
         plotThreads[i] = {
           ...plotThreads[i],
@@ -420,6 +456,13 @@ export function mergeManuscriptIndexSlice(
     threadKeys.add(key);
     plotThreads.push({ ...t, name });
   }
+
+  const resolveAssignmentName = (raw: string): string | null => {
+    const n = raw.trim();
+    if (!n) return null;
+    if (!lockThreads) return n;
+    return matchExistingThreadName(n, lockedNames);
+  };
 
   const assignMap = new Map<string, Set<string>>();
   for (const a of acc.plotAssignments) {
@@ -435,8 +478,8 @@ export function mergeManuscriptIndexSlice(
     if (!id) continue;
     const set = assignMap.get(id) ?? new Set<string>();
     for (const n of a.threadNames ?? []) {
-      const t = n.trim();
-      if (t) set.add(t);
+      const resolved = resolveAssignmentName(n);
+      if (resolved) set.add(resolved);
     }
     assignMap.set(id, set);
   }
@@ -545,6 +588,12 @@ export function buildManuscriptIndexContext(
         .join("\n")
     : "";
 
+  const existingThreads = book.plotThreads ?? [];
+  const lockedThreadLine =
+    existingThreads.length > 0
+      ? `LOCKED plot threads — use ONLY these exact names in plotThreads and plotAssignments.threadNames (do not invent new tracks): ${existingThreads.map((t) => t.name).join(", ")}. You may echo them with short summaries.`
+      : `No plot threads yet — propose clear tracks and assign scenes.`;
+
   const preamble = [
     `Manuscript: ${book.title || "Untitled"}`,
     `Pass ${passMeta.pass}/${passMeta.passCount} — chapters ${window.fromChapter + 1}–${window.toChapter} of ${chapters.length}.`,
@@ -553,12 +602,13 @@ export function buildManuscriptIndexContext(
     `Chronicle = world lore history (ages, wars, founding) — NOT present plot beats.`,
     `plotAssignments must use exact sceneId values from the blocks below.`,
     `Plot thread colors only from: ${PLOT_THREAD_PALETTE.join(", ")}.`,
+    lockedThreadLine,
     "",
     `Already in bible cast: ${(book.characters ?? []).map((c) => c.name).slice(0, 40).join(", ") || "(none)"}`,
     `Already in bible places: ${(book.locations ?? []).map((l) => l.name).slice(0, 40).join(", ") || "(none)"}`,
     `Already in encyclopedia: ${(book.encyclopedia ?? []).map((e) => e.title).slice(0, 30).join(", ") || "(none)"}`,
     `Already in chronicle: ${(book.chronicle ?? []).map((e) => e.title).slice(0, 20).join(", ") || "(none)"}`,
-    `Existing plot threads: ${(book.plotThreads ?? []).map((t) => t.name).join(", ") || "(none)"}`,
+    `Existing plot threads: ${existingThreads.map((t) => t.name).join(", ") || "(none)"}`,
     priorDigest ? `\nPrior passes:\n${priorDigest}` : "",
     "",
     "Scenes in this window:",

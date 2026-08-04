@@ -129,8 +129,8 @@ function collectCharacterEvidence(
       sceneId: a.scene.id,
       sceneTitle: a.scene.title,
       asPov: a.asPov,
-      tagged: true,
-      proseMatch: nameInProse(prose, names),
+      tagged: a.asPov || a.inCast,
+      proseMatch: a.viaProse || nameInProse(prose, names),
       location: a.scene.location ?? "",
       synopsis: a.scene.synopsis ?? "",
       cast: [a.scene.pov, ...(a.scene.characters ?? [])]

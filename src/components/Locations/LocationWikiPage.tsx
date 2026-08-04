@@ -30,6 +30,7 @@ import {
 } from "@/lib/types";
 import { ContinuityNotesSection } from "@/components/Bible/ContinuityNotesSection";
 import { MembershipChecklist } from "@/components/Bible/MembershipChecklist";
+import { NameContinuityPanel } from "@/components/Bible/NameContinuityPanel";
 import {
   createMapPin,
   mapsPinningLocation,
@@ -674,10 +675,23 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
           </WikiSection>
 
           <WikiSection id="appearances" title="On the page" index={8}>
-            <LocationAppearancesRail
-              appearances={appearances}
+            <NameContinuityPanel
+              book={book}
+              name={location.name}
+              aliases={location.aliases ?? []}
+              entityKind="location"
+              entityId={location.id}
               onOpenScene={focusScene}
             />
+            <div className="mt-10 border-t border-[rgba(45,42,38,0.08)] pt-8">
+              <p className="mb-4 font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+                Scene timeline
+              </p>
+              <LocationAppearancesRail
+                appearances={appearances}
+                onOpenScene={focusScene}
+              />
+            </div>
           </WikiSection>
         </article>
       </div>

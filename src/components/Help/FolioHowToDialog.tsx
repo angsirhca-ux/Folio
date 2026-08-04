@@ -59,12 +59,12 @@ const TABS: Array<{ icon: LucideIcon; label: string; blurb: string }> = [
   {
     icon: Users,
     label: "Characters",
-    blurb: "Cast wiki — roles, voice, relationships, family trees.",
+    blurb: "Cast wiki — roles, voice, relationships. On the page checks name spellings across prose and the bible.",
   },
   {
     icon: MapPin,
     label: "Locations",
-    blurb: "Places in the story — atmosphere and how the book uses them.",
+    blurb: "Places in the story — atmosphere, and where each name shows up on the page.",
   },
   {
     icon: Map,
@@ -167,7 +167,8 @@ const SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: "⌘ ⌥ R", action: "Research rail" },
   { keys: "⌘ ⌥ E", action: "Encyclopedia rail" },
   { keys: "⌘ \\", action: "Chapter sidebar" },
-  { keys: "⌘ .", action: "Fullscreen" },
+  { keys: "⌘ .", action: "Fullscreen writing" },
+  { keys: "Esc", action: "Exit fullscreen / close search" },
   { keys: "⌥ ↑ ↓", action: "Previous / next chapter" },
 ];
 

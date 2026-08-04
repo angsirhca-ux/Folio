@@ -242,12 +242,16 @@ export function WritingApp() {
 
   useEffect(() => {
     if (!settings.fullscreen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") toggleFullscreen();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [settings.fullscreen, toggleFullscreen]);
+    // Close manuscript side rails so writing owns the viewport.
+    setNotesOpen(false);
+    setGoalsOpen(false);
+    setEditorOpen(false);
+    setBetaOpen(false);
+    setCritiqueOpen(false);
+    setInspectorOpen(false);
+    setResearchOpen(false);
+    setEncyclopediaOpen(false);
+  }, [settings.fullscreen]);
 
   const onEditorReady = useCallback(
     (ed: Editor | null) => {
@@ -289,7 +293,6 @@ export function WritingApp() {
     <div
       className={cn(
         "relative min-h-screen bg-[var(--paper)] text-[var(--ink)]",
-        settings.fullscreen && "folio-fullscreen",
       )}
     >
       <motion.div
@@ -464,7 +467,14 @@ export function WritingApp() {
           variant="ghost"
           size="icon-sm"
           aria-label={
-            settings.fullscreen ? "Exit fullscreen" : "Fullscreen writing"
+            settings.fullscreen
+              ? "Exit fullscreen (Escape)"
+              : "Fullscreen writing"
+          }
+          title={
+            settings.fullscreen
+              ? "Exit fullscreen (Esc)"
+              : "Fullscreen writing — Esc to leave"
           }
           onClick={toggleFullscreen}
         >

@@ -69,9 +69,10 @@ export function LocationAppearancesRail({
                 <span className="font-[family-name:var(--font-display)] text-base text-[var(--ink)] transition-colors group-hover:text-[color-mix(in_srgb,var(--accent)_70%,var(--ink))]">
                   {a.scene.title || "Untitled scene"}
                 </span>
-                {!a.tagged ? (
+                {!a.tagged && a.viaProse ? (
                   <span className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
                     Prose
+                    {a.matchedAs ? ` · ${a.matchedAs}` : ""}
                   </span>
                 ) : null}
                 <span

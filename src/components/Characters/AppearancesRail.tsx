@@ -19,8 +19,8 @@ export function AppearancesRail({
   if (appearances.length === 0) {
     return (
       <p className="font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
-        No scenes yet. Tag this character on the storyboard or set them as POV —
-        appearances will gather here as the manuscript grows.
+        No scenes yet. Tag this character on the storyboard, set them as POV, or
+        write their name into the prose — appearances will gather here.
       </p>
     );
   }
@@ -48,7 +48,11 @@ export function AppearancesRail({
             <span
               className={cn(
                 "absolute -left-[1.65rem] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-[#EDE8E0]",
-                a.asPov ? "bg-[var(--accent)]" : "bg-[var(--ink-faint)]",
+                a.asPov
+                  ? "bg-[var(--accent)]"
+                  : a.viaProse
+                    ? "bg-[var(--ink-faint)]"
+                    : "bg-[var(--ink-faint)]",
               )}
               aria-hidden
             />
@@ -72,6 +76,12 @@ export function AppearancesRail({
                 {a.asPov ? (
                   <span className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--accent)]">
                     POV
+                  </span>
+                ) : null}
+                {a.viaProse ? (
+                  <span className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
+                    Prose
+                    {a.matchedAs ? ` · ${a.matchedAs}` : ""}
                   </span>
                 ) : null}
                 <span

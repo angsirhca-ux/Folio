@@ -165,21 +165,45 @@ export interface CharacterAppearance {
   scene: Scene;
   sceneIndex: number;
   asPov: boolean;
+  /** Named in scene cast tags. */
+  inCast: boolean;
+  /** Found in scene prose (name or alias) without a cast/POV tag. */
+  viaProse: boolean;
+  /** Which form matched in prose, when viaProse. */
+  matchedAs?: string;
 }
 
-/** Scenes where this character is cast or POV, in manuscript order. */
+/** Scenes where this character is cast, POV, or named in prose. */
 export function characterAppearances(
   chapters: Chapter[],
   character: Character,
 ): CharacterAppearance[] {
+  const forms = [character.name, ...(character.aliases ?? [])]
+    .map((n) => n.trim())
+    .filter((n) => n.length >= 2)
+    .sort((a, b) => b.length - a.length);
   const out: CharacterAppearance[] = [];
+
   chapters.forEach((chapter, chapterIndex) => {
+    const parts = getSceneHtmlParts(chapter.content ?? "");
     (chapter.scenes ?? []).forEach((scene, sceneIndex) => {
       const asPov = characterMatchesName(character, scene.pov);
       const inCast = (scene.characters ?? []).some((n) =>
         characterMatchesName(character, n),
       );
-      if (asPov || inCast) {
+      let viaProse = false;
+      let matchedAs: string | undefined;
+      if (!asPov && !inCast && forms.length) {
+        const prose = scenePlainText(parts[sceneIndex] ?? "");
+        for (const form of forms) {
+          if (nameMentionedInText(prose, form)) {
+            viaProse = true;
+            matchedAs = form;
+            break;
+          }
+        }
+      }
+      if (asPov || inCast || viaProse) {
         out.push({
           chapterId: chapter.id,
           chapterTitle: chapter.title,
@@ -187,6 +211,9 @@ export function characterAppearances(
           scene,
           sceneIndex,
           asPov,
+          inCast,
+          viaProse,
+          matchedAs,
         });
       }
     });
@@ -407,8 +434,8 @@ function buildStoryDigest(
     const loc = a.scene.location?.trim();
     lines.push(
       `• ${a.chapterTitle} / ${a.scene.title}${a.asPov ? " (POV)" : ""}${
-        loc ? ` — ${loc}` : ""
-      }`,
+        a.viaProse ? " (prose)" : ""
+      }${loc ? ` — ${loc}` : ""}`,
     );
     if (bit && bit !== a.scene.title) {
       lines.push(`  ${bit}`);

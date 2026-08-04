@@ -132,11 +132,18 @@ export async function POST(request: Request) {
     chronicle: body.book.chronicle ?? [],
     plotThreads: body.book.plotThreads ?? [],
   };
+  const seededThreads = (body.book.plotThreads ?? []).map((t) => ({
+    name: t.name,
+    color: t.color,
+  }));
+  const hasLockedThreads = seededThreads.length > 0;
 
   try {
     const { result, passCount } = await runManuscriptPasses<ManuscriptIndex>({
       windows,
-      empty: emptyManuscriptIndex(sourceHash),
+      empty: emptyManuscriptIndex(sourceHash, {
+        plotThreads: seededThreads,
+      }),
       merge: (acc, part) => mergeManuscriptIndexSlice(acc, part),
       runPass: async (window, meta) => {
         const context = buildManuscriptIndexContext(
@@ -146,7 +153,9 @@ export async function POST(request: Request) {
           { pass: meta.pass, passCount: meta.passCount },
         );
         if (context.length < 120) {
-          return emptyManuscriptIndex(sourceHash);
+          return emptyManuscriptIndex(sourceHash, {
+            plotThreads: seededThreads,
+          });
         }
 
         const message = await client.messages.create({
@@ -161,7 +170,11 @@ export async function POST(request: Request) {
 Extract ONLY what is evidenced in this chapter window (plus continuity with prior finds listed in the prompt).
 Return cast names, places, outside-research topics, in-world encyclopedia seeds, world-history chronicle events (lore — not plot beats), and plot threads with exact sceneId assignments.
 Never invent unsupported entities. Never rewrite manuscript prose.
-Reuse plot thread names from prior passes when the same strand continues.`,
+${
+  hasLockedThreads
+    ? "Plot threads are LOCKED to the names listed in the prompt — use those exact names only; do not invent new tracks; assign scenes onto them."
+    : "Reuse plot thread names from prior passes when the same strand continues."
+}`,
           messages: [
             {
               role: "user",
@@ -176,7 +189,9 @@ Reuse plot thread names from prior passes when the same strand continues.`,
         );
         const slice = normalizeSlice(raw);
         return mergeManuscriptIndexSlice(
-          emptyManuscriptIndex(sourceHash),
+          emptyManuscriptIndex(sourceHash, {
+            plotThreads: seededThreads,
+          }),
           slice,
         );
       },

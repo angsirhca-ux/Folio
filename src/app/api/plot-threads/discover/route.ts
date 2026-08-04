@@ -77,6 +77,9 @@ export async function POST(request: Request) {
     0,
   );
 
+  const existingThreads = body.book.plotThreads ?? [];
+  const hasLockedThreads = existingThreads.length > 0;
+
   try {
     const message = await client.messages.create({
       model: anthropicModel(),
@@ -87,7 +90,11 @@ export async function POST(request: Request) {
         name: PLOT_THREAD_DISCOVER_TOOL_NAME,
       },
       system: `You map a novelist's manuscript onto a Plottr-style timeline of plot threads.
-Propose 3–8 sharp threads (main plot, romance, mystery, character arcs, etc.) — not vague themes.
+${
+  hasLockedThreads
+    ? `Threads are LOCKED. Use ONLY these exact names: ${existingThreads.map((t) => t.name).join(", ")}. Do not invent new threads. Assign scenes onto these tracks.`
+    : `Propose 3–8 sharp threads (main plot, romance, mystery, character arcs, etc.) — not vague themes.`
+}
 Assign only real sceneId values from the context. A scene may touch multiple threads.
 Use only these hex colors: ${PLOT_THREAD_PALETTE.join(", ")}.
 Do not invent scenes or rewrite prose. Flags and structure only.`,
