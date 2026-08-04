@@ -36,9 +36,14 @@ export async function GET() {
 
 type ReviewBody = {
   kind: DevelopmentalPassKind;
-  book: Pick<Book, "title" | "author" | "characters" | "locations">;
+  book: Pick<
+    Book,
+    "title" | "author" | "characters" | "locations" | "chapters"
+  >;
   chapter: Pick<Chapter, "id" | "title" | "content" | "scenes">;
   memory?: DevelopmentalMemoryNote[];
+  /** Prior passes for cross-chapter digests (same book). */
+  passes?: Book["developmentalEditor"]["passes"];
 };
 
 export async function POST(request: Request) {
@@ -63,9 +68,13 @@ export async function POST(request: Request) {
   const kindRaw = String(body.kind);
   if (kindRaw === "line") {
     body.kind = "style";
-  } else if (kindRaw !== "style" && kindRaw !== "story") {
+  } else if (
+    kindRaw !== "style" &&
+    kindRaw !== "story" &&
+    kindRaw !== "action"
+  ) {
     return NextResponse.json(
-      { error: 'kind must be "style" or "story".' },
+      { error: 'kind must be "style", "story", or "action".' },
       { status: 400 },
     );
   }
@@ -98,10 +107,12 @@ export async function POST(request: Request) {
       author: body.book?.author ?? "",
       characters: body.book?.characters ?? [],
       locations: body.book?.locations ?? [],
+      chapters: body.book?.chapters ?? [chapter],
     },
     chapter,
     kind: body.kind,
     memory: body.memory ?? [],
+    passes: body.passes ?? [],
   });
 
   const passLabel = chapterPassLabel(body.kind);

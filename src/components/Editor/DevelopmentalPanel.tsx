@@ -13,6 +13,7 @@ import {
   Pin,
   ScanSearch,
   Waypoints,
+  Zap,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -38,12 +39,13 @@ import {
 import { cn } from "@/lib/utils";
 
 async function reviewChapter(
-  kind: "style" | "story",
+  kind: "style" | "story" | "action",
   book: {
     title: string;
     author: string;
     characters: unknown[];
     locations: unknown[];
+    chapters: unknown[];
   },
   chapter: {
     id: string;
@@ -52,6 +54,7 @@ async function reviewChapter(
     scenes: unknown[];
   },
   memory: DevelopmentalMemoryNote[],
+  passes: DevelopmentalPass[],
   signal?: AbortSignal,
 ): Promise<{
   pass: DevelopmentalPass;
@@ -60,7 +63,7 @@ async function reviewChapter(
   const res = await fetch("/api/editor/review", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, book, chapter, memory }),
+    body: JSON.stringify({ kind, book, chapter, memory, passes }),
     signal,
   });
   const data = (await res.json()) as {
@@ -133,6 +136,7 @@ function aiAbortErrorMessage(err: unknown): string {
 const PASS_TABS: DevelopmentalPassKind[] = [
   "style",
   "story",
+  "action",
   "continuity",
 ];
 
@@ -320,6 +324,11 @@ export function DevelopmentalPanel({
               author: book.author,
               characters: book.characters ?? [],
               locations: book.locations ?? [],
+              chapters: book.chapters.map((c) => ({
+                id: c.id,
+                title: c.title,
+                summary: c.summary ?? "",
+              })),
             },
             {
               id: activeChapter.id,
@@ -328,6 +337,7 @@ export function DevelopmentalPanel({
               scenes: activeChapter.scenes ?? [],
             },
             editorState.memory,
+            editorState.passes ?? [],
             controller.signal,
           );
           applyDevelopmentalReview(pass, memoryUpdates);
@@ -442,7 +452,7 @@ export function DevelopmentalPanel({
                     Runs
                   </span>
                   <span className="mt-0.5 block truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
-                    Style & Line · Story & Structure · Continuity
+                    Style & Line · Story · Action · Continuity
                   </span>
                 </span>
                 <ChevronDown
@@ -496,6 +506,19 @@ export function DevelopmentalPanel({
                         }
                         configured={claude?.configured ?? null}
                         onClick={() => void runPass("story")}
+                      />
+                      <PassButton
+                        kind="action"
+                        icon={
+                          <Zap className="h-3.5 w-3.5" strokeWidth={1.5} />
+                        }
+                        busy={busyKind === "action"}
+                        elapsedSec={busyKind === "action" ? busyElapsedSec : 0}
+                        disabled={
+                          busyKind != null || claude?.configured === false
+                        }
+                        configured={claude?.configured ?? null}
+                        onClick={() => void runPass("action")}
                       />
                       <PassButton
                         kind="continuity"
@@ -555,7 +578,9 @@ export function DevelopmentalPanel({
                     ? "Style & Line"
                     : kind === "story"
                       ? "Story"
-                      : "Continuity"}
+                      : kind === "action"
+                        ? "Action"
+                        : "Continuity"}
                 </button>
               ))}
               <button
@@ -719,7 +744,9 @@ export function DevelopmentalPanel({
                         ? `No ${
                             viewKind === "style"
                               ? "style & line"
-                              : "story"
+                              : viewKind === "action"
+                                ? "action"
+                                : "story"
                           } pass yet`
                         : "Ready when you are"}
                   </p>
@@ -728,7 +755,9 @@ export function DevelopmentalPanel({
                       ? "Run Continuity to scan the whole manuscript for name slips, cast gaps, place jumps, and timeline cracks — flags only."
                       : viewKind === "style"
                         ? "Run Style & Line on this chapter for mechanics, rhythm, diction, and dialogue polish — flags only, never rewrites."
-                        : "Expand Runs above, then start Style & Line or Story & Structure. The editor will flag issues without touching your words."}
+                        : viewKind === "action"
+                          ? "Run Action to highlight moments that want dramatized doing — flags and try-nexts only, never rewrites."
+                          : "Expand Runs above, then start Style, Story, or Action. The editor will flag issues without touching your words."}
                   </p>
                   {!passesOpen ? (
                     <button

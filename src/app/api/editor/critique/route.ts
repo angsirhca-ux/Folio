@@ -4,9 +4,9 @@ import {
   CRITIQUE_TOOL,
   buildCritiqueContext,
   critiqueSystemPrompt,
-  critiqueToolForLens,
-  lensById,
+  critiqueToolForPack,
   normalizeCritiquePayload,
+  packById,
   type CritiquePayload,
 } from "@/lib/critique";
 import { chapterToPlainText } from "@/lib/developmentalEditor";
@@ -34,7 +34,9 @@ export async function GET() {
 }
 
 type CritiqueBody = {
-  lensId: string;
+  packId: string;
+  /** @deprecated prefer packId */
+  lensId?: string;
   book: Pick<
     Book,
     | "title"
@@ -69,10 +71,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const lens = lensById(body.lensId);
-  if (!lens) {
+  const pack = packById(body.packId);
+  if (!pack) {
     return NextResponse.json(
-      { error: "Unknown critique lens." },
+      { error: "Unknown critique pack. Use smart or pressure." },
       { status: 400 },
     );
   }
@@ -119,12 +121,12 @@ export async function POST(request: Request) {
       chapters,
     },
     chapter,
-    lens,
-    memory: (body.memory ?? []).filter((m) => m.lensId === lens.id),
-    reviews: (body.reviews ?? []).filter((r) => r.lensId === lens.id),
+    pack,
+    memory: (body.memory ?? []),
+    reviews: (body.reviews ?? []).filter((r) => r.packId === pack.id),
   });
 
-  const tool = critiqueToolForLens(lens);
+  const tool = critiqueToolForPack(pack);
 
   try {
     const message = await client.messages.create({
@@ -132,17 +134,18 @@ export async function POST(request: Request) {
       max_tokens: CRITIQUE_MAX_TOKENS,
       tools: [tool],
       tool_choice: { type: "tool", name: CRITIQUE_TOOL },
-      system: critiqueSystemPrompt(lens),
+      system: critiqueSystemPrompt(pack),
       messages: [
         {
           role: "user",
-          content: `Apply the ${lens.name} checklist to this chapter and respond with the save_critique tool.
+          content: `Apply the ${pack.name} checklist to this chapter and respond with the save_critique tool.
 
 Remember:
-- Answer EVERY question id with yes | partial | no.
+- Answer EVERY question id with yes | partial | no | n/a.
+- Use n/a for Fantasy/Romance items that do not apply.
 - For no/partial, prefer a short verbatim excerpt when evidence exists.
 - suggestion is a watch-for seed only — never rewritten prose.
-- memoryUpdates only for durable lens patterns (max 5).
+- memoryUpdates only for durable patterns (max 5).
 - Never rewrite the manuscript.
 
 ${context}`,
@@ -159,7 +162,7 @@ ${context}`,
     }
 
     const { review, memoryUpdates } = normalizeCritiquePayload(raw, {
-      lens,
+      pack,
       chapter,
     });
 

@@ -3,27 +3,36 @@
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { Editor } from "@tiptap/react";
-import { ClipboardCheck, Loader2, X } from "lucide-react";
+import {
+  ChevronDown,
+  ClipboardCheck,
+  Gauge,
+  Loader2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
 import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
 import {
-  DEFAULT_CRITIQUE_LENSES,
+  SMART_CRITIQUE_PACK,
+  groupCritiqueItems,
   latestCritiqueReview,
-  memoryForLens,
+  memoryForCritique,
+  packById,
+  visibleCritiqueItems,
 } from "@/lib/critique";
 import { focusEditorExcerpt } from "@/lib/editorNavigate";
 import { formatRelativeDate } from "@/lib/scenes";
 import type {
-  CritiqueLensId,
   CritiqueMemoryNote,
+  CritiquePackId,
   CritiqueReview,
   CritiqueVerdict,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 async function runCritique(args: {
-  lensId: CritiqueLensId;
+  packId: CritiquePackId;
   book: {
     title: string;
     author: string;
@@ -81,6 +90,10 @@ const VERDICT_STYLES: Record<
     label: "No",
     className: "bg-[rgba(107,58,42,0.12)] text-[#6B3A2A]",
   },
+  "n/a": {
+    label: "N/A",
+    className: "bg-[rgba(45,42,38,0.08)] text-[var(--ink-faint)]",
+  },
 };
 
 export function CritiquePanel({
@@ -100,33 +113,39 @@ export function CritiquePanel({
     clearCritiqueReviews,
   } = useBook();
   const claude = useClaudeStatus();
-  const lenses = DEFAULT_CRITIQUE_LENSES;
   const state = book.critique ?? { memory: [], reviews: [] };
 
-  const [lensId, setLensId] = useState<CritiqueLensId>(
-    lenses[0]?.id ?? "fantasy-worldbuilding",
-  );
-  const [busy, setBusy] = useState(false);
+  const [viewPackId, setViewPackId] = useState<CritiquePackId>("smart");
+  const [busyPack, setBusyPack] = useState<CritiquePackId | null>(null);
   const [busyElapsedSec, setBusyElapsedSec] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showMemory, setShowMemory] = useState(false);
+  const [showNa, setShowNa] = useState(false);
+  const [runsOpen, setRunsOpen] = useState(true);
 
-  const lens = lenses.find((l) => l.id === lensId) ?? lenses[0] ?? null;
+  const viewPack = packById(viewPackId) ?? SMART_CRITIQUE_PACK;
+  const busy = busyPack != null;
 
   const review = useMemo(
-    () =>
-      lens ? latestCritiqueReview(state, lens.id, activeChapter.id) : undefined,
-    [state, lens, activeChapter.id],
+    () => latestCritiqueReview(state, viewPackId, activeChapter.id),
+    [state, viewPackId, activeChapter.id],
   );
 
-  const lensMemory = useMemo(
-    () => (lens ? memoryForLens(state, lens.id) : []),
-    [state, lens],
+  const allMemory = useMemo(() => memoryForCritique(state), [state]);
+
+  const smartReview = useMemo(
+    () => latestCritiqueReview(state, "smart", activeChapter.id),
+    [state, activeChapter.id],
+  );
+  const pressureReview = useMemo(
+    () => latestCritiqueReview(state, "pressure", activeChapter.id),
+    [state, activeChapter.id],
   );
 
-  async function runSelected() {
-    if (!lens || busy) return;
-    setBusy(true);
+  async function runPack(packId: CritiquePackId) {
+    if (busy) return;
+    setBusyPack(packId);
+    setViewPackId(packId);
     setBusyElapsedSec(0);
     setError(null);
     const controller = new AbortController();
@@ -139,7 +158,7 @@ export function CritiquePanel({
     }, 1000);
     try {
       const { review: next, memoryUpdates } = await runCritique({
-        lensId: lens.id,
+        packId,
         book: {
           title: book.title,
           author: book.author,
@@ -160,12 +179,13 @@ export function CritiquePanel({
           content: activeChapter.content,
           summary: activeChapter.summary ?? "",
         },
-        memory: lensMemory,
-        reviews: (state.reviews ?? []).filter((r) => r.lensId === lens.id),
+        memory: allMemory,
+        reviews: (state.reviews ?? []).filter((r) => r.packId === packId),
         signal: controller.signal,
       });
       applyCritiqueReview(next, memoryUpdates);
       setShowMemory(false);
+      setRunsOpen(false);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setError(
@@ -177,10 +197,20 @@ export function CritiquePanel({
     } finally {
       window.clearTimeout(timeout);
       window.clearInterval(tick);
-      setBusy(false);
+      setBusyPack(null);
       setBusyElapsedSec(0);
     }
   }
+
+  const displayItems = review
+    ? visibleCritiqueItems(review.items, showNa)
+    : [];
+  const groups = review
+    ? groupCritiqueItems(displayItems, viewPack)
+    : [];
+  const questionById = new Map(
+    viewPack.questions.map((q) => [q.id, q] as const),
+  );
 
   return (
     <AnimatePresence>
@@ -213,68 +243,97 @@ export function CritiquePanel({
                 </button>
               </div>
 
-              <p className="mt-3 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-                Checklist only — never rewrites. Genre lenses ask whether the
-                world holds up, with optional excerpts as evidence.
-              </p>
-
-              <div className="mt-4 grid gap-2">
-                {lenses.map((l) => {
-                  const active = lens?.id === l.id;
-                  return (
-                    <button
-                      key={l.id}
-                      type="button"
-                      onClick={() => {
-                        setLensId(l.id);
-                        setShowMemory(false);
-                        setError(null);
-                      }}
-                      className={cn(
-                        "rounded-xl border px-3 py-2.5 text-left transition-colors",
-                        active
-                          ? "border-[rgba(176,141,87,0.35)] bg-[rgba(247,243,234,0.65)]"
-                          : "border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.3)] hover:border-[rgba(176,141,87,0.22)]",
-                      )}
-                    >
-                      <span className="block font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
-                        {l.name}
-                      </span>
-                      <span className="mt-0.5 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-                        {l.blurb}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={busy || !lens || claude?.configured === false}
-                  onClick={() => void runSelected()}
-                  className="gap-1.5"
-                >
-                  {busy ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ClipboardCheck className="h-3.5 w-3.5" strokeWidth={1.5} />
+              <button
+                type="button"
+                aria-expanded={runsOpen}
+                onClick={() => setRunsOpen((v) => !v)}
+                className="mt-4 flex w-full items-center justify-between gap-2 rounded-xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.45)] px-3 py-2.5 text-left transition-colors hover:border-[rgba(176,141,87,0.28)]"
+              >
+                <span className="min-w-0">
+                  <span className="block font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
+                    Runs
+                  </span>
+                  <span className="mt-0.5 block truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                    Smart pack · Pressure
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 shrink-0 text-[var(--ink-faint)] transition-transform duration-300",
+                    runsOpen && "rotate-180",
                   )}
-                  {busy
-                    ? `Critiquing…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
-                    : review
-                      ? "Re-run critique"
-                      : "Critique this chapter"}
-                </Button>
-              </div>
+                  strokeWidth={1.5}
+                />
+              </button>
 
-              {claude?.configured === false ? (
-                <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                  Add ANTHROPIC_API_KEY to .env.local (see env.example), then
-                  restart the server.
-                </p>
-              ) : null}
+              <AnimatePresence initial={false}>
+                {runsOpen ? (
+                  <motion.div
+                    key="critique-runs"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <p className="mt-3 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                      Checklist only — never rewrites. Memory carries prior
+                      chapters so settled patterns aren’t re-lectured. Collapse
+                      this bar to read the full checklist.
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={busy || claude?.configured === false}
+                        onClick={() => void runPack("smart")}
+                        className="gap-1.5"
+                      >
+                        {busyPack === "smart" ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <ClipboardCheck
+                            className="h-3.5 w-3.5"
+                            strokeWidth={1.5}
+                          />
+                        )}
+                        {busyPack === "smart"
+                          ? `Smart pack…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
+                          : smartReview
+                            ? "Re-run smart pack"
+                            : "Smart pack"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy || claude?.configured === false}
+                        onClick={() => void runPack("pressure")}
+                        className="gap-1.5"
+                      >
+                        {busyPack === "pressure" ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Gauge className="h-3.5 w-3.5" strokeWidth={1.5} />
+                        )}
+                        {busyPack === "pressure"
+                          ? `Pressure…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
+                          : pressureReview
+                            ? "Re-run pressure"
+                            : "Pressure"}
+                      </Button>
+                    </div>
+
+                    {claude?.configured === false ? (
+                      <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+                        Add ANTHROPIC_API_KEY to .env.local (see env.example),
+                        then restart the server.
+                      </p>
+                    ) : null}
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
 
               {error ? (
                 <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
@@ -286,15 +345,33 @@ export function CritiquePanel({
             <div className="flex shrink-0 items-center gap-1 border-b border-[rgba(45,42,38,0.08)] px-4 py-2">
               <button
                 type="button"
-                onClick={() => setShowMemory(false)}
+                onClick={() => {
+                  setViewPackId("smart");
+                  setShowMemory(false);
+                }}
                 className={cn(
                   "rounded-full px-3 py-1.5 font-[family-name:var(--font-ui)] text-xs transition-colors",
-                  !showMemory
+                  viewPackId === "smart" && !showMemory
                     ? "bg-[var(--accent-soft)] text-[var(--ink)]"
                     : "text-[var(--ink-faint)] hover:text-[var(--ink-muted)]",
                 )}
               >
-                This chapter
+                Smart{smartReview ? "" : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setViewPackId("pressure");
+                  setShowMemory(false);
+                }}
+                className={cn(
+                  "rounded-full px-3 py-1.5 font-[family-name:var(--font-ui)] text-xs transition-colors",
+                  viewPackId === "pressure" && !showMemory
+                    ? "bg-[var(--accent-soft)] text-[var(--ink)]"
+                    : "text-[var(--ink-faint)] hover:text-[var(--ink-muted)]",
+                )}
+              >
+                Pressure
               </button>
               <button
                 type="button"
@@ -306,7 +383,7 @@ export function CritiquePanel({
                     : "text-[var(--ink-faint)] hover:text-[var(--ink-muted)]",
                 )}
               >
-                Memory ({lensMemory.length})
+                Memory ({allMemory.length})
               </button>
               <button
                 type="button"
@@ -319,26 +396,26 @@ export function CritiquePanel({
                 }}
                 className="ml-auto font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)] hover:text-[var(--ink-muted)]"
               >
-                Clear memory
+                Clear
               </button>
             </div>
 
             <div className="folio-scroll min-h-0 flex-1 overflow-y-auto px-5 py-5">
               {showMemory ? (
-                lensMemory.length === 0 ? (
+                allMemory.length === 0 ? (
                   <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
-                    No memory yet. After a critique, durable lens notes land
-                    here so the next chapter remembers what mattered.
+                    No critique memory yet. After a run, durable notes land here
+                    so later chapters remember what already held.
                   </p>
                 ) : (
                   <ul className="space-y-3">
-                    {lensMemory.map((m) => (
+                    {allMemory.map((m) => (
                       <li
                         key={m.id}
                         className="border-b border-[rgba(45,42,38,0.06)] pb-3 last:border-0"
                       >
                         <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
-                          {m.kind}
+                          {m.packId} · {m.kind}
                         </p>
                         <p className="mt-1 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
                           {m.text}
@@ -348,81 +425,113 @@ export function CritiquePanel({
                   </ul>
                 )
               ) : !review ? (
-                <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
-                  {lens
-                    ? `No ${lens.name.toLowerCase()} critique for this chapter yet.`
-                    : "Pick a lens to begin."}
-                </p>
+                <div className="py-8 text-center">
+                  <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
+                    {viewPackId === "smart"
+                      ? "No smart-pack critique for this chapter yet."
+                      : "No pressure run for this chapter yet."}
+                  </p>
+                  {!runsOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => setRunsOpen(true)}
+                      className="mt-4 font-[family-name:var(--font-ui)] text-sm text-[var(--accent)] underline-offset-2 hover:underline"
+                    >
+                      Open Runs
+                    </button>
+                  ) : null}
+                </div>
               ) : (
                 <div className="space-y-6">
                   <div>
                     <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
-                      {lens?.name} · {formatRelativeDate(review.createdAt)}
+                      {viewPack.name} · {formatRelativeDate(review.createdAt)}
                     </p>
                     <p className="mt-2 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
                       {review.summary}
                     </p>
+                    {viewPackId === "smart" ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowNa((v) => !v)}
+                        className="mt-2 font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)] hover:text-[var(--ink-muted)]"
+                      >
+                        {showNa ? "Hide skipped (n/a)" : "Show skipped (n/a)"}
+                      </button>
+                    ) : null}
                   </div>
 
-                  <section>
-                    <h3 className="font-[family-name:var(--font-display)] text-sm tracking-wide text-[var(--ink)]">
-                      Checklist
-                    </h3>
-                    <ul className="mt-3 space-y-4">
-                      {(lens?.questions ?? []).map((q) => {
-                        const item = review.items.find(
-                          (i) => i.questionId === q.id,
-                        );
-                        if (!item) return null;
-                        const verdict = VERDICT_STYLES[item.verdict];
-                        const showRedFlag =
-                          item.verdict === "no" || item.verdict === "partial";
-                        return (
-                          <li key={q.id}>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span
-                                className={cn(
-                                  "rounded-full px-2 py-0.5 font-[family-name:var(--font-ui)] text-[0.65rem] font-medium uppercase tracking-[0.08em]",
-                                  verdict.className,
-                                )}
-                              >
-                                {verdict.label}
-                              </span>
-                              <p className="font-[family-name:var(--font-ui)] text-xs font-medium text-[var(--ink-muted)]">
-                                {q.prompt}
+                  {groups.map((group) => (
+                    <section key={group.sectionId}>
+                      <h3 className="font-[family-name:var(--font-display)] text-sm tracking-wide text-[var(--ink)]">
+                        {group.label}
+                      </h3>
+                      <ul className="mt-3 space-y-4">
+                        {group.items.map((item) => {
+                          const q = questionById.get(item.questionId);
+                          const verdict = VERDICT_STYLES[item.verdict];
+                          const showRedFlag =
+                            item.verdict === "no" || item.verdict === "partial";
+                          return (
+                            <li key={item.questionId}>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                  className={cn(
+                                    "rounded-full px-2 py-0.5 font-[family-name:var(--font-ui)] text-[0.65rem] font-medium uppercase tracking-[0.08em]",
+                                    verdict.className,
+                                  )}
+                                >
+                                  {verdict.label}
+                                </span>
+                                <p className="font-[family-name:var(--font-ui)] text-xs font-medium text-[var(--ink-muted)]">
+                                  {q?.prompt ?? item.questionId}
+                                </p>
+                              </div>
+                              {showRedFlag && q ? (
+                                <p className="mt-1.5 font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-faint)]">
+                                  Red flag: {q.redFlag}
+                                </p>
+                              ) : null}
+                              <p className="mt-1.5 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
+                                {item.note}
                               </p>
-                            </div>
-                            {showRedFlag ? (
-                              <p className="mt-1.5 font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-faint)]">
-                                Red flag: {q.redFlag}
-                              </p>
-                            ) : null}
-                            <p className="mt-1.5 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
-                              {item.note}
-                            </p>
-                            {item.excerpt ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (editor) {
-                                    focusEditorExcerpt(editor, item.excerpt!);
-                                  }
-                                }}
-                                className="mt-1.5 block w-full border-l-2 border-[rgba(176,141,87,0.35)] pl-2 text-left font-[family-name:var(--font-serif)] text-sm italic leading-relaxed text-[var(--ink-muted)] transition-colors hover:text-[var(--ink)]"
-                              >
-                                “{item.excerpt}”
-                              </button>
-                            ) : null}
-                            {item.suggestion ? (
-                              <p className="mt-1.5 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-                                Watch for: {item.suggestion}
-                              </p>
-                            ) : null}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </section>
+                              {item.excerpt ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (editor) {
+                                      focusEditorExcerpt(editor, item.excerpt!);
+                                    }
+                                  }}
+                                  className="mt-1.5 block w-full border-l-2 border-[rgba(176,141,87,0.35)] pl-2 text-left font-[family-name:var(--font-serif)] text-sm italic leading-relaxed text-[var(--ink-muted)] transition-colors hover:text-[var(--ink)]"
+                                >
+                                  “{item.excerpt}”
+                                </button>
+                              ) : null}
+                              {item.suggestion && item.verdict !== "n/a" ? (
+                                <p className="mt-1.5 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                                  Watch for: {item.suggestion}
+                                </p>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  ))}
+
+                  {groups.length === 0 ? (
+                    <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
+                      All items were marked n/a for this chapter.{" "}
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => setShowNa(true)}
+                      >
+                        Show skipped
+                      </button>
+                    </p>
+                  ) : null}
 
                   <button
                     type="button"

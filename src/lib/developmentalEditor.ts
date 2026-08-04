@@ -29,7 +29,14 @@ export function emptyDevelopmentalEditor(): DevelopmentalEditorState {
 
 /** Map legacy Line Edit / show-dont-tell into Style & Story. */
 function migratePassKind(kind: string | undefined): DevelopmentalPassKind {
-  if (kind === "story" || kind === "continuity" || kind === "style") return kind;
+  if (
+    kind === "story" ||
+    kind === "continuity" ||
+    kind === "style" ||
+    kind === "action"
+  ) {
+    return kind;
+  }
   if (kind === "line") return "style";
   return "style";
 }
@@ -55,6 +62,11 @@ function migrateFlagCategory(
         "pacing",
         "plot-holes",
         "character-voice",
+        "summarized-action",
+        "static-description",
+        "talking-heads",
+        "blurred-sequence",
+        "named-emotion-action",
         "name-variants",
         "cast-mismatch",
         "location-jump",
@@ -197,11 +209,20 @@ const STORY_CATEGORIES: DevelopmentalFlagCategory[] = [
   "character-voice",
 ];
 
+const ACTION_CATEGORIES: DevelopmentalFlagCategory[] = [
+  "summarized-action",
+  "static-description",
+  "talking-heads",
+  "blurred-sequence",
+  "named-emotion-action",
+];
+
 export function categoriesForPass(
   kind: DevelopmentalPassKind,
 ): DevelopmentalFlagCategory[] {
   if (kind === "style") return STYLE_CATEGORIES;
   if (kind === "story") return STORY_CATEGORIES;
+  if (kind === "action") return ACTION_CATEGORIES;
   return [
     "name-variants",
     "cast-mismatch",
@@ -215,6 +236,7 @@ export function categoriesForPass(
 export function chapterPassLabel(kind: DevelopmentalPassKind): string {
   if (kind === "style") return "Style & Line";
   if (kind === "story") return "Story & Structure";
+  if (kind === "action") return "Action";
   return "Continuity";
 }
 
@@ -236,6 +258,10 @@ export function coerceFlagCategory(
       return "character-voice";
     }
     if (raw === "flow-rhythm" || raw === "redundancy") return "pacing";
+  }
+  if (kind === "action") {
+    if (raw === "telling") return "summarized-action";
+    if (raw === "pacing") return "blurred-sequence";
   }
   return null;
 }
@@ -286,6 +312,7 @@ export function normalizeReviewPayload(
       kind:
         m.kind === "style" ||
         m.kind === "story" ||
+        m.kind === "action" ||
         m.kind === "continuity"
           ? m.kind
           : String(m.kind) === "line"
@@ -536,10 +563,12 @@ export function appendPrivateNote(
 }
 
 export function buildReviewContext(args: {
-  book: Pick<Book, "title" | "author" | "characters" | "locations">;
+  book: Pick<Book, "title" | "author" | "characters" | "locations" | "chapters">;
   chapter: Chapter;
   kind: DevelopmentalPassKind;
   memory: DevelopmentalMemoryNote[];
+  /** Prior editorial passes — used for cross-chapter memory digests. */
+  passes?: DevelopmentalPass[];
 }): string {
   const plain = truncateChapterPlain(chapterToPlainText(args.chapter.content));
   const cast = (args.book.characters ?? [])
@@ -562,12 +591,44 @@ export function buildReviewContext(args: {
     .join("\n");
   const { preferencesBlock, generalBlock } = formatMemoryBlocks(args.memory);
   const voiceBible =
-    args.kind === "story" || args.kind === "style"
+    args.kind === "story" ||
+    args.kind === "style" ||
+    args.kind === "action"
       ? buildCharacterVoiceSnippets(
           args.book.characters ?? [],
           args.chapter,
         )
       : "";
+
+  const chapterIndex = (args.book.chapters ?? []).findIndex(
+    (c) => c.id === args.chapter.id,
+  );
+  const priorPasses = args.passes ?? [];
+  const priorDigests =
+    args.kind === "continuity"
+      ? ""
+      : (args.book.chapters ?? [])
+          .slice(0, Math.max(0, chapterIndex))
+          .map((c, i) => {
+            const priorPass = priorPasses.find(
+              (p) => p.chapterId === c.id && p.kind === args.kind,
+            );
+            const openFlags = (priorPass?.flags ?? [])
+              .filter((f) => !f.closed)
+              .slice(0, 3)
+              .map((f) => `${f.category}: ${f.note.slice(0, 100)}`)
+              .join("; ");
+            const bits = [
+              (c.summary || "").trim().slice(0, 160),
+              priorPass?.summary
+                ? `Earlier ${chapterPassLabel(args.kind)}: ${priorPass.summary.slice(0, 200)}`
+                : "",
+              openFlags ? `Open notes: ${openFlags}` : "",
+            ].filter(Boolean);
+            return `- Ch ${i + 1} “${c.title}”: ${bits.join(" — ") || "(no prior pass yet)"}`;
+          })
+          .slice(-10)
+          .join("\n");
 
   return [
     `Book: ${args.book.title || "Untitled"}`,
@@ -578,8 +639,14 @@ export function buildReviewContext(args: {
     "AUTHOR PREFERENCES (from ✓ liked / ✕ not useful on prior flags — respect tone; do not suppress real issues solely because of dislike):",
     preferencesBlock,
     "",
-    "EDITOR MEMORY (durable notes from prior passes — use to stay consistent; do not invent):",
+    "EDITOR MEMORY (durable notes from prior passes — stay consistent; do not re-lecture the same pattern unless it recurs freshly here):",
     generalBlock,
+    "",
+    priorDigests
+      ? `PRIOR CHAPTER DIGESTS (what this pass already saw earlier in the book):\n${priorDigests}`
+      : args.kind === "continuity"
+        ? ""
+        : "PRIOR CHAPTER DIGESTS: (opening / first chapter — no earlier passes yet)",
     "",
     cast ? `Cast roster (names only — for voice/consistency checks):\n${cast}` : "",
     places ? `Places (names only):\n${places}` : "",
@@ -611,6 +678,7 @@ HARD RULES:
 - Always provide two distinct suggestions per flag (different angles).
 - Flag ONLY the current chapter text provided. Other chapters are out of scope for flags.
 - Use AUTHOR PREFERENCES and EDITOR MEMORY to stay consistent: lean into patterns they liked; soften categories they disliked — but still flag genuine issues.
+- Use PRIOR CHAPTER DIGESTS when present: do not rehash the same lecture if a pattern was already noted earlier unless it clearly recurs in this chapter’s text.
 - Prefer precise, spare notes. No cheerleading. No marketing tone.
 - If the chapter is thin, return few or no flags rather than stretching.
 - memoryUpdates: only durable patterns worth remembering later (max 4). Skip one-off nits.`;
@@ -638,10 +706,27 @@ For each real instance, add a flag with that line’s excerpt — do not only su
 Ignore story/plot/character-arc and show-vs-tell (those belong to Story & Structure). Stay at the line level — no plot holes, world-rule breaks, or book-wide continuity.`;
   }
 
-  return `${shared}
+  if (kind === "action") {
+    return `${shared}
+
+ACTION — find moments where dramatized physical/dramatic action could carry what is currently told, summarized, static, or blurred. This is NOT a general show-vs-tell pass (Story owns that). Prefer kinetic opportunities.
+
+Categories (use only these ids):
+1. summarized-action — a high-stakes beat told or summarized instead of dramatized in sequence.
+2. static-description — inert description where motion, choice, or cause→effect would serve the scene.
+3. talking-heads — dialogue or pure interior with no physical grounding when the scene needs embodied beats.
+4. blurred-sequence — fight, chase, labor, or ritual as blur rather than clear action with consequence.
+5. named-emotion-action — emotion labeled where a gesture or concrete action beat could carry it (narrow — do not vacuum every telling).
+
+For each real instance, flag with a verbatim excerpt. Soft cap ~${MAX_FLAGS_PER_PASS}.
+Ignore filter words, plot holes, and book-wide continuity. Do not rewrite the manuscript.`;
+  }
+
+  if (kind === "story") {
+    return `${shared}
 
 STORY & STRUCTURE — look only for:
-1. telling — narrative summary where a scene could play out in moment-to-moment action or dialogue (show vs tell).
+1. telling — narrative summary where a scene could play out in moment-to-moment action or dialogue (show vs tell). Prefer broader show/tell here; leave kinetic dramatization instances to the Action pass when both could apply.
 2. pacing — sudden speed-ups, or slow paragraphs that drag without earning their weight.
 3. plot-holes — logic gaps, broken world rules (use memory + roster when helpful), or timeline slips visible in this chapter.
 4. character-voice — dialogue or interiority that collapses distinct characters into one voice, or drifts from the CHARACTER VOICE BIBLE when provided.
@@ -651,6 +736,11 @@ For character-voice flags: diagnose against this book's voice notes (speech, man
 Pick every clear story/structure issue (soft cap ~${MAX_FLAGS_PER_PASS}). Use only the category ids above.
 
 Ignore copy-edit minutiae (filter words, -ly counts, rhythm) on this pass.`;
+  }
+
+  return `${shared}
+
+CONTINITY — whole-book consistency (handled by a separate continuity route when used).`;
 }
 
 export function reviewToolForKind(kind: DevelopmentalPassKind) {
@@ -707,7 +797,7 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
             properties: {
               kind: {
                 type: "string",
-                enum: ["style", "story", "general"],
+                enum: ["style", "story", "action", "general"],
               },
               text: {
                 type: "string",

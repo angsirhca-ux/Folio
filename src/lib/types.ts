@@ -640,7 +640,7 @@ export interface StoryMapRegion {
 }
 
 /** Editorial passes — chapter craft vs book-wide continuity. */
-export type DevelopmentalPassKind = "style" | "story" | "continuity";
+export type DevelopmentalPassKind = "style" | "story" | "action" | "continuity";
 
 export type DevelopmentalFlagCategory =
   | "filter-words"
@@ -656,6 +656,11 @@ export type DevelopmentalFlagCategory =
   | "pacing"
   | "plot-holes"
   | "character-voice"
+  | "summarized-action"
+  | "static-description"
+  | "talking-heads"
+  | "blurred-sequence"
+  | "named-emotion-action"
   | "name-variants"
   | "cast-mismatch"
   | "location-jump"
@@ -802,10 +807,24 @@ export interface BetaReadersState {
   reviews: BetaReview[];
 }
 
-/** Pluggable genre critique lens (Fantasy ships first). */
-export type CritiqueLensId = "fantasy-worldbuilding";
+/** Pluggable genre / craft critique — packs replace brand lens UI. */
+export type CritiqueLensId =
+  | "fantasy-worldbuilding"
+  | "romancing-the-beat"
+  | "truby"
+  | "story-genius"
+  | "selling-writer";
 
-export type CritiqueVerdict = "yes" | "partial" | "no";
+export type CritiquePackId = "smart" | "pressure";
+
+export type CritiqueSectionId =
+  | "scene"
+  | "fantasy"
+  | "romance"
+  | "arc"
+  | "pressure";
+
+export type CritiqueVerdict = "yes" | "partial" | "no" | "n/a";
 
 export interface CritiqueQuestion {
   id: string;
@@ -823,8 +842,20 @@ export interface CritiqueLens {
   questions: CritiqueQuestion[];
 }
 
+export interface CritiquePackQuestion extends CritiqueQuestion {
+  sectionId: CritiqueSectionId;
+}
+
+export interface CritiquePack {
+  id: CritiquePackId;
+  name: string;
+  blurb: string;
+  questions: CritiquePackQuestion[];
+}
+
 export interface CritiqueItemResult {
   questionId: string;
+  sectionId: CritiqueSectionId;
   verdict: CritiqueVerdict;
   note: string;
   /** Verbatim moment when no/partial is grounded in the chapter. */
@@ -835,7 +866,9 @@ export interface CritiqueItemResult {
 
 export interface CritiqueReview {
   id: string;
-  lensId: CritiqueLensId;
+  packId: CritiquePackId;
+  /** Legacy single-lens reviews (pre-pack). */
+  lensId?: CritiqueLensId;
   chapterId: string;
   chapterTitle: string;
   createdAt: number;
@@ -846,7 +879,9 @@ export interface CritiqueReview {
 export interface CritiqueMemoryNote {
   id: string;
   at: number;
-  lensId: CritiqueLensId;
+  packId: CritiquePackId;
+  /** Legacy single-lens memory. */
+  lensId?: CritiqueLensId;
   kind: "pattern" | "strength" | "risk" | "general";
   text: string;
   chapterId?: string;
@@ -981,6 +1016,11 @@ export const DEVELOPMENTAL_PASS_META: Record<
     blurb:
       "Telling vs showing, pacing, plot holes, and character voice — flags only.",
   },
+  action: {
+    label: "Action",
+    blurb:
+      "Moments that want dramatized action — summarized beats, static description, talking-heads, blurry sequences.",
+  },
   continuity: {
     label: "Continuity",
     blurb:
@@ -1005,6 +1045,11 @@ export const DEVELOPMENTAL_CATEGORY_META: Record<
   pacing: { label: "Pacing", pass: "story" },
   "plot-holes": { label: "Plot holes", pass: "story" },
   "character-voice": { label: "Character voice", pass: "story" },
+  "summarized-action": { label: "Summarized action", pass: "action" },
+  "static-description": { label: "Static description", pass: "action" },
+  "talking-heads": { label: "Talking heads", pass: "action" },
+  "blurred-sequence": { label: "Blurred sequence", pass: "action" },
+  "named-emotion-action": { label: "Named emotion", pass: "action" },
   "name-variants": { label: "Name variants", pass: "continuity" },
   "cast-mismatch": { label: "Cast mismatch", pass: "continuity" },
   "location-jump": { label: "Location jump", pass: "continuity" },

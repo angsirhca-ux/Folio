@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, Users, X } from "lucide-react";
+import { ChevronDown, Loader2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
 import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
@@ -114,6 +114,7 @@ export function BetaReadersPanel({
   const [busyElapsedSec, setBusyElapsedSec] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showMemory, setShowMemory] = useState(false);
+  const [runsOpen, setRunsOpen] = useState(true);
 
   const selected =
     readers.find((r) => r.id === selectedId) ?? readers[0] ?? null;
@@ -169,6 +170,7 @@ export function BetaReadersPanel({
       });
       applyBetaReview(next, memoryUpdates);
       setShowMemory(false);
+      setRunsOpen(false);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setError(
@@ -216,70 +218,107 @@ export function BetaReadersPanel({
                 </button>
               </div>
 
-              <p className="mt-3 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-                Readers keep memory across chapters — reactions and craft
-                answers only. Never rewrites your prose.
-              </p>
-
-              <div className="mt-4 grid gap-2">
-                {readers.map((r) => {
-                  const active = selected?.id === r.id;
-                  return (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedId(r.id);
-                        setShowMemory(false);
-                        setError(null);
-                      }}
-                      className={cn(
-                        "rounded-xl border px-3 py-2.5 text-left transition-colors",
-                        active
-                          ? "border-[rgba(176,141,87,0.35)] bg-[rgba(247,243,234,0.65)]"
-                          : "border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.3)] hover:border-[rgba(176,141,87,0.22)]",
-                      )}
-                    >
-                      <span className="block font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
-                        {r.name}
-                      </span>
-                      <span className="mt-0.5 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-                        {r.blurb}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={
-                    busy || !selected || claude?.configured === false
-                  }
-                  onClick={() => void runSelected()}
-                  className="gap-1.5"
-                >
-                  {busy ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
+              <button
+                type="button"
+                aria-expanded={runsOpen}
+                onClick={() => setRunsOpen((v) => !v)}
+                className="mt-4 flex w-full items-center justify-between gap-2 rounded-xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.45)] px-3 py-2.5 text-left transition-colors hover:border-[rgba(176,141,87,0.28)]"
+              >
+                <span className="min-w-0">
+                  <span className="block font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
+                    Runs
+                  </span>
+                  <span className="mt-0.5 block truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                    {selected?.name ?? "Pick a reader"} · memory across chapters
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-4 w-4 shrink-0 text-[var(--ink-faint)] transition-transform duration-300",
+                    runsOpen && "rotate-180",
                   )}
-                  {busy
-                    ? `${selected?.name ?? "Reader"} is reading…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
-                    : review
-                      ? `Re-read with ${selected?.name ?? "reader"}`
-                      : `Read with ${selected?.name ?? "reader"}`}
-                </Button>
-              </div>
+                  strokeWidth={1.5}
+                />
+              </button>
 
-              {claude?.configured === false ? (
-                <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                  Add ANTHROPIC_API_KEY to .env.local (see env.example), then
-                  restart the server.
-                </p>
-              ) : null}
+              <AnimatePresence initial={false}>
+                {runsOpen ? (
+                  <motion.div
+                    key="beta-runs"
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <p className="mt-3 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                      Readers keep memory across chapters — reactions and craft
+                      answers only. Never rewrites. Collapse this bar to read
+                      the full response.
+                    </p>
+
+                    <div className="mt-3 grid gap-2">
+                      {readers.map((r) => {
+                        const active = selected?.id === r.id;
+                        return (
+                          <button
+                            key={r.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedId(r.id);
+                              setShowMemory(false);
+                              setError(null);
+                            }}
+                            className={cn(
+                              "rounded-xl border px-3 py-2.5 text-left transition-colors",
+                              active
+                                ? "border-[rgba(176,141,87,0.35)] bg-[rgba(247,243,234,0.65)]"
+                                : "border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.3)] hover:border-[rgba(176,141,87,0.22)]",
+                            )}
+                          >
+                            <span className="block font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                              {r.name}
+                            </span>
+                            <span className="mt-0.5 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                              {r.blurb}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={
+                          busy || !selected || claude?.configured === false
+                        }
+                        onClick={() => void runSelected()}
+                        className="gap-1.5"
+                      >
+                        {busy ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
+                        )}
+                        {busy
+                          ? `${selected?.name ?? "Reader"} is reading…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
+                          : review
+                            ? `Re-read with ${selected?.name ?? "reader"}`
+                            : `Read with ${selected?.name ?? "reader"}`}
+                      </Button>
+                    </div>
+
+                    {claude?.configured === false ? (
+                      <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+                        Add ANTHROPIC_API_KEY to .env.local (see env.example),
+                        then restart the server.
+                      </p>
+                    ) : null}
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
 
               {error ? (
                 <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[#6B3A2A]">
@@ -355,11 +394,22 @@ export function BetaReadersPanel({
                   </ul>
                 )
               ) : !review ? (
-                <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
-                  {selected
-                    ? `${selected.name} hasn’t read this chapter yet.`
-                    : "Pick a reader to begin."}
-                </p>
+                <div className="py-8 text-center">
+                  <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
+                    {selected
+                      ? `${selected.name} hasn’t read this chapter yet.`
+                      : "Pick a reader to begin."}
+                  </p>
+                  {!runsOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => setRunsOpen(true)}
+                      className="mt-4 font-[family-name:var(--font-ui)] text-sm text-[var(--accent)] underline-offset-2 hover:underline"
+                    >
+                      Open Runs
+                    </button>
+                  ) : null}
+                </div>
               ) : (
                 <div className="space-y-6">
                   <div>
