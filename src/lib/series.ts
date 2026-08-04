@@ -6,6 +6,7 @@ import type {
   FolioLibrary,
   Location,
   Series,
+  StoryMap,
 } from "./types";
 import { createId } from "./utils";
 import { createCharacter, findCharacterByName } from "./characters";
@@ -18,6 +19,7 @@ import {
   findStackByName,
   sortEncyclopediaStacks,
 } from "./encyclopedia";
+import { normalizeMap } from "./map";
 
 export function createSeries(
   partial?: Partial<Series> & { title?: string },
@@ -32,6 +34,7 @@ export function createSeries(
     locations: partial?.locations ?? [],
     encyclopedia: partial?.encyclopedia ?? [],
     encyclopediaStacks: partial?.encyclopediaStacks ?? [],
+    maps: partial?.maps ?? [],
     createdAt: partial?.createdAt ?? now,
     updatedAt: partial?.updatedAt ?? now,
   };
@@ -81,6 +84,7 @@ export function hydrateSeries(raw: Partial<Series> | null | undefined): Series {
     ),
     encyclopediaStacks: sortEncyclopediaStacks(stacks),
     encyclopedia,
+    maps: (raw?.maps ?? []).map((m) => normalizeMap(m)),
   };
 }
 
@@ -391,5 +395,118 @@ export function seriesEncyclopediaMissingFromBook(
   if (!series) return [];
   return (series.encyclopedia ?? []).filter(
     (e) => !findEncyclopediaByTitle(book.encyclopedia ?? [], e.title),
+  );
+}
+
+function remapMapPinsByLocationName(
+  map: StoryMap,
+  fromLocations: Location[],
+  toLocations: Location[],
+): StoryMap {
+  const fromById = new Map(fromLocations.map((l) => [l.id, l]));
+  const pins = map.pins
+    .map((pin) => {
+      const from = fromById.get(pin.locationId);
+      if (!from) return null;
+      const to = findLocationByName(toLocations, from.name);
+      if (!to) return null;
+      return { ...pin, id: createId(), locationId: to.id };
+    })
+    .filter(Boolean) as StoryMap["pins"];
+  return normalizeMap({
+    ...map,
+    id: createId(),
+    pins,
+    labels: map.labels.map((l) => ({ ...l, id: createId() })),
+    regions: map.regions.map((r) => ({ ...r, id: createId() })),
+    paths: (map.paths ?? []).map((p) => ({ ...p, id: createId() })),
+  });
+}
+
+/**
+ * Promote the active book map into the series bible.
+ * Pins remapped onto series locations by name (locations must already be on the series).
+ */
+export function promoteMapToSeries(
+  series: Series,
+  book: Book,
+  map: StoryMap,
+): Series {
+  const remapped = remapMapPinsByLocationName(
+    map,
+    book.locations ?? [],
+    series.locations ?? [],
+  );
+  const named = {
+    ...remapped,
+    name: map.name.trim() || "Map",
+  };
+  const existing = (series.maps ?? []).find(
+    (m) => m.name.trim().toLowerCase() === named.name.trim().toLowerCase(),
+  );
+  if (existing) {
+    return {
+      ...series,
+      maps: (series.maps ?? []).map((m) =>
+        m.id === existing.id ? { ...named, id: existing.id } : m,
+      ),
+      updatedAt: Date.now(),
+    };
+  }
+  return {
+    ...series,
+    maps: [...(series.maps ?? []), named],
+    updatedAt: Date.now(),
+  };
+}
+
+/**
+ * Clone a series map into the book. Pins remapped onto book locations by name.
+ * Locations not yet on the book are skipped (bring places first if needed).
+ */
+export function cloneSeriesMapIntoBook(
+  book: Book,
+  series: Series,
+  map: StoryMap,
+): { book: Book; map: StoryMap; alreadyHad: boolean } {
+  const existing = (book.maps ?? []).find(
+    (m) => m.name.trim().toLowerCase() === map.name.trim().toLowerCase(),
+  );
+  if (existing) {
+    return { book, map: existing, alreadyHad: true };
+  }
+  const remapped = remapMapPinsByLocationName(
+    map,
+    series.locations ?? [],
+    book.locations ?? [],
+  );
+  const clone = {
+    ...remapped,
+    name: map.name.trim() || "Map",
+  };
+  const maps = [...(book.maps ?? []), clone];
+  return {
+    book: {
+      ...book,
+      maps,
+      activeMapId: clone.id,
+      map: clone,
+      updatedAt: Date.now(),
+    },
+    map: clone,
+    alreadyHad: false,
+  };
+}
+
+export function seriesMapsMissingFromBook(
+  series: Series | undefined,
+  book: Book,
+): StoryMap[] {
+  if (!series) return [];
+  const have = new Set(
+    (book.maps ?? []).map((m) => m.name.trim().toLowerCase()),
+  );
+  return (series.maps ?? []).filter(
+    (m) => !have.has(m.name.trim().toLowerCase()),
   );
 }

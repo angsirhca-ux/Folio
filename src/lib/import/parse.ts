@@ -179,6 +179,10 @@ export function parsedToBook(
       memory: [],
       reviews: [],
     },
+    critique: existing?.critique ?? {
+      memory: [],
+      reviews: [],
+    },
     dump: existing?.dump ?? {
       pages: [],
       activePageId: "",

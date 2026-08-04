@@ -329,6 +329,15 @@ export interface ChronicleEvent {
   linkedEntryIds: string[];
   linkedCharacterIds: string[];
   linkedLocationIds: string[];
+  /**
+   * Optional soft marker on a story map — lore geography, not a Location pin.
+   * Cleared if the map is deleted.
+   */
+  mapMarker?: {
+    mapId: string;
+    x: number;
+    y: number;
+  };
   createdAt: number;
   updatedAt: number;
 }
@@ -415,6 +424,8 @@ export interface Series {
   locations: Location[];
   encyclopedia: EncyclopediaEntry[];
   encyclopediaStacks: EncyclopediaStack[];
+  /** Shared geography corkboards for books in this series. */
+  maps: StoryMap[];
   createdAt: number;
   updatedAt: number;
 }
@@ -505,6 +516,11 @@ export interface Book {
    */
   betaReaders: BetaReadersState;
   /**
+   * Genre critique lenses (e.g. Fantasy worldbuilding).
+   * Checklist verdicts only — never rewrites the manuscript.
+   */
+  critique: CritiqueState;
+  /**
    * Working dump — free pages for scraps, spare scenes, name lists,
    * and anything not yet sorted into the manuscript or wiki.
    */
@@ -530,14 +546,20 @@ export interface StoryMap {
   pins: StoryMapPin[];
   labels: StoryMapLabel[];
   regions: StoryMapRegion[];
+  /** Simple polylines — roads, paths, rivers. */
+  paths: StoryMapPath[];
   /**
    * Optional real-world basemap as a data URL (JPEG/PNG).
-   * For contemporary / urban / romance settings — e.g. a London street map —
-   * with story pins laid on top.
+   * For contemporary / urban settings — with story pins laid on top.
    */
   backgroundImage?: string;
   /** Original filename of the uploaded basemap, for the author UI. */
   backgroundName?: string;
+  /**
+   * Packaged vector board (crisp at any zoom). Mutually exclusive with
+   * backgroundImage in the UI — City starter uses this.
+   */
+  backgroundVector?: "city";
 }
 
 export interface StoryMapPin {
@@ -559,13 +581,39 @@ export interface StoryMapLabel {
   y: number;
 }
 
-/** Soft named area on the author map — territory wash, range, or water. */
-export type StoryMapRegionKind = "territory" | "mountains" | "water";
+/**
+ * A simple polyline on the corkboard — road, path, or river.
+ * Not freehand cartography: ordered points in 0–1 space.
+ */
+export type StoryMapPathKind = "road" | "path" | "river";
 
-/** Outline for a painted feature — change anytime after drawing. */
-export type StoryMapRegionShape = "rect" | "ellipse" | "soft";
+export interface StoryMapPath {
+  id: string;
+  name: string;
+  kind: StoryMapPathKind;
+  /** Ordered points in 0–1 map space (at least 2). */
+  points: Array<{ x: number; y: number }>;
+  source?: "author" | "claude";
+}
 
-/** Soft named area — box in 0–1 space; may be rotated / reshaped. */
+/** Soft named area on the author map — wash, or a placed feature icon. */
+export type StoryMapRegionKind =
+  | "territory"
+  | "mountains"
+  | "water"
+  | "building";
+
+/** Outline for a painted territory — change anytime after drawing. */
+export type StoryMapRegionShape = "rect" | "ellipse" | "soft" | "polygon";
+
+/** Optional edge treatment for territory washes (default none). */
+export type StoryMapRegionStroke = "none" | "soft" | "ink";
+
+/**
+ * Territory: painted wash box in 0–1 space (may be rotated / reshaped).
+ * Mountains / water / building: point icons (small fixed box around a center).
+ * Polygon: absolute outline points in 0–1 map space (shape creator).
+ */
 export interface StoryMapRegion {
   id: string;
   name: string;
@@ -576,16 +624,23 @@ export interface StoryMapRegion {
   h: number;
   /** Degrees clockwise; 0 is upright. */
   rotation: number;
-  /** Box, oval, or organic outline. */
+  /** Box, oval, organic, or free polygon outline. */
   shape: StoryMapRegionShape;
   /** Key into MAP_TERRITORY_PALETTE (e.g. "sage", "mist"). */
   color: string;
+  /** Territory edge — none by default (fill only). */
+  stroke?: StoryMapRegionStroke;
+  /**
+   * Absolute outline in 0–1 map space when shape is polygon.
+   * Bounding box x/y/w/h is derived from these points.
+   */
+  points?: Array<{ x: number; y: number }>;
   /** Author-drawn vs Claude story build — rebuild replaces claude regions only. */
   source?: "author" | "claude";
 }
 
 /** Editorial passes — chapter craft vs book-wide continuity. */
-export type DevelopmentalPassKind = "style" | "story" | "line" | "continuity";
+export type DevelopmentalPassKind = "style" | "story" | "continuity";
 
 export type DevelopmentalFlagCategory =
   | "filter-words"
@@ -593,15 +648,14 @@ export type DevelopmentalFlagCategory =
   | "repetition"
   | "dialogue-tags"
   | "adverbs"
-  | "telling"
-  | "pacing"
-  | "plot-holes"
-  | "character-voice"
   | "flow-rhythm"
   | "redundancy"
   | "word-choice"
   | "dialogue-polish"
-  | "show-dont-tell"
+  | "telling"
+  | "pacing"
+  | "plot-holes"
+  | "character-voice"
   | "name-variants"
   | "cast-mismatch"
   | "location-jump"
@@ -748,6 +802,61 @@ export interface BetaReadersState {
   reviews: BetaReview[];
 }
 
+/** Pluggable genre critique lens (Fantasy ships first). */
+export type CritiqueLensId = "fantasy-worldbuilding";
+
+export type CritiqueVerdict = "yes" | "partial" | "no";
+
+export interface CritiqueQuestion {
+  id: string;
+  prompt: string;
+  /** What readers feel when the answer is no. */
+  redFlag: string;
+}
+
+export interface CritiqueLens {
+  id: CritiqueLensId;
+  name: string;
+  blurb: string;
+  /** Soft genre tags for future filtering. */
+  genres: string[];
+  questions: CritiqueQuestion[];
+}
+
+export interface CritiqueItemResult {
+  questionId: string;
+  verdict: CritiqueVerdict;
+  note: string;
+  /** Verbatim moment when no/partial is grounded in the chapter. */
+  excerpt?: string;
+  /** Gentle watch-for seed — never replacement prose. */
+  suggestion?: string;
+}
+
+export interface CritiqueReview {
+  id: string;
+  lensId: CritiqueLensId;
+  chapterId: string;
+  chapterTitle: string;
+  createdAt: number;
+  summary: string;
+  items: CritiqueItemResult[];
+}
+
+export interface CritiqueMemoryNote {
+  id: string;
+  at: number;
+  lensId: CritiqueLensId;
+  kind: "pattern" | "strength" | "risk" | "general";
+  text: string;
+  chapterId?: string;
+}
+
+export interface CritiqueState {
+  memory: CritiqueMemoryNote[];
+  reviews: CritiqueReview[];
+}
+
 /** One free page in the book dump (scraps, names, spare scenes). */
 export interface DumpPage {
   id: string;
@@ -863,19 +972,14 @@ export const DEVELOPMENTAL_PASS_META: Record<
   { label: string; blurb: string }
 > = {
   style: {
-    label: "Style & Mechanics",
+    label: "Style & Line",
     blurb:
-      "Filter words, weak verbs, repetition, dialogue tags, and -ly adverbs.",
+      "Mechanics and prose — filters, verbs, repetition, tags, adverbs, rhythm, diction, dialogue polish.",
   },
   story: {
     label: "Story & Structure",
     blurb:
       "Telling vs showing, pacing, plot holes, and character voice — flags only.",
-  },
-  line: {
-    label: "Line Edit",
-    blurb:
-      "Flow & rhythm, cut redundancy, sharpen diction, polish dialogue, show don’t tell — this chapter only.",
   },
   continuity: {
     label: "Continuity",
@@ -893,15 +997,14 @@ export const DEVELOPMENTAL_CATEGORY_META: Record<
   repetition: { label: "Repetition", pass: "style" },
   "dialogue-tags": { label: "Dialogue tags", pass: "style" },
   adverbs: { label: "Adverbs", pass: "style" },
+  "flow-rhythm": { label: "Flow & rhythm", pass: "style" },
+  redundancy: { label: "Redundancy", pass: "style" },
+  "word-choice": { label: "Word choice", pass: "style" },
+  "dialogue-polish": { label: "Dialogue", pass: "style" },
   telling: { label: "Telling vs showing", pass: "story" },
   pacing: { label: "Pacing", pass: "story" },
   "plot-holes": { label: "Plot holes", pass: "story" },
   "character-voice": { label: "Character voice", pass: "story" },
-  "flow-rhythm": { label: "Flow & rhythm", pass: "line" },
-  redundancy: { label: "Redundancy", pass: "line" },
-  "word-choice": { label: "Word choice", pass: "line" },
-  "dialogue-polish": { label: "Dialogue", pass: "line" },
-  "show-dont-tell": { label: "Show, don’t tell", pass: "line" },
   "name-variants": { label: "Name variants", pass: "continuity" },
   "cast-mismatch": { label: "Cast mismatch", pass: "continuity" },
   "location-jump": { label: "Location jump", pass: "continuity" },

@@ -14,6 +14,13 @@ export function createChronicleEvent(
     linkedEntryIds: partial.linkedEntryIds ?? [],
     linkedCharacterIds: partial.linkedCharacterIds ?? [],
     linkedLocationIds: partial.linkedLocationIds ?? [],
+    mapMarker: partial.mapMarker
+      ? {
+          mapId: partial.mapMarker.mapId,
+          x: Math.min(1, Math.max(0, partial.mapMarker.x)),
+          y: Math.min(1, Math.max(0, partial.mapMarker.y)),
+        }
+      : undefined,
     createdAt: partial.createdAt ?? now,
     updatedAt: partial.updatedAt ?? now,
   };

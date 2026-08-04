@@ -8,12 +8,13 @@ import {
   seriesCharactersMissingFromBook,
   seriesEncyclopediaMissingFromBook,
   seriesLocationsMissingFromBook,
+  seriesMapsMissingFromBook,
 } from "@/lib/series";
 
 export function SeriesBibleStrip({
   kind,
 }: {
-  kind: "characters" | "locations" | "encyclopedia";
+  kind: "characters" | "locations" | "encyclopedia" | "maps";
 }) {
   const router = useRouter();
   const {
@@ -22,6 +23,7 @@ export function SeriesBibleStrip({
     bringSeriesCharacterIntoBook,
     bringSeriesLocationIntoBook,
     bringSeriesEncyclopediaIntoBook,
+    bringSeriesMapIntoBook,
   } = useBook();
 
   const series = findSeries(librarySeries, book.seriesId);
@@ -82,20 +84,41 @@ export function SeriesBibleStrip({
     );
   }
 
-  const missing = seriesEncyclopediaMissingFromBook(series, book);
+  if (kind === "encyclopedia") {
+    const missing = seriesEncyclopediaMissingFromBook(series, book);
+    return (
+      <SeriesStripShell
+        seriesId={series.id}
+        seriesTitle={series.title}
+        sharedCount={(series.encyclopedia ?? []).length}
+        emptyHint="This book already has every series article — or the bible is empty. Open an encyclopedia wiki to promote it into the series."
+        missing={missing.map((e) => ({
+          id: e.id,
+          title: e.title,
+          blurb: e.shortBio,
+          onBring: () => {
+            const id = bringSeriesEncyclopediaIntoBook(e.id);
+            if (id) router.push(`/encyclopedia/${id}`);
+          },
+        }))}
+      />
+    );
+  }
+
+  const missing = seriesMapsMissingFromBook(series, book);
   return (
     <SeriesStripShell
       seriesId={series.id}
       seriesTitle={series.title}
-      sharedCount={(series.encyclopedia ?? []).length}
-      emptyHint="This book already has every series article — or the bible is empty. Open an encyclopedia wiki to promote it into the series."
-      missing={missing.map((e) => ({
-        id: e.id,
-        title: e.title,
-        blurb: e.shortBio,
+      sharedCount={(series.maps ?? []).length}
+      emptyHint="This book already has every series map — or the bible is empty. Promote a map from the Map page into the series."
+      missing={missing.map((m) => ({
+        id: m.id,
+        title: m.name,
+        blurb: m.backgroundName ?? "",
         onBring: () => {
-          const id = bringSeriesEncyclopediaIntoBook(e.id);
-          if (id) router.push(`/encyclopedia/${id}`);
+          const id = bringSeriesMapIntoBook(m.id);
+          if (id) router.push("/map");
         },
       }))}
     />

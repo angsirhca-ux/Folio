@@ -93,9 +93,9 @@ export function SeriesPage({ seriesId }: { seriesId: string }) {
           className="mt-3 w-full bg-transparent font-[family-name:var(--font-display)] text-4xl font-medium tracking-tight text-[var(--ink)] focus:outline-none"
         />
         <p className="mt-4 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
-        Shared cast, places, and encyclopedia for every book in this series.
-          Bring entries into a manuscript when that book needs them — books stay
-          free to diverge.
+          Shared cast, places, encyclopedia, and maps for every book in this
+          series. Bring entries into a manuscript when that book needs them —
+          books stay free to diverge.
         </p>
       </header>
 
@@ -441,6 +441,54 @@ export function SeriesPage({ seriesId }: { seriesId: string }) {
                 </li>
               );
             })
+          )}
+        </ul>
+      </section>
+
+      <section className="mb-10">
+        <h2 className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+          Shared maps
+        </h2>
+        <p className="mt-2 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+          Promote from a book’s Map page. Pins rematch by place name when
+          brought into another manuscript.
+        </p>
+        <ul className="mt-3 space-y-3">
+          {(series.maps ?? []).length === 0 ? (
+            <li className="font-[family-name:var(--font-ui)] text-sm italic text-[var(--ink-faint)]">
+              Empty — open Map in a series book and promote.
+            </li>
+          ) : (
+            (series.maps ?? []).map((m) => (
+              <li
+                key={m.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[rgba(45,42,38,0.06)] bg-[rgba(247,243,234,0.35)] px-4 py-3"
+              >
+                <div>
+                  <p className="font-[family-name:var(--font-display)] text-lg text-[var(--ink)]">
+                    {m.name.trim() || "Map"}
+                  </p>
+                  <p className="mt-0.5 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+                    {(m.pins ?? []).length} pins · {(m.regions ?? []).length}{" "}
+                    regions
+                    {(m.paths ?? []).length
+                      ? ` · ${(m.paths ?? []).length} routes`
+                      : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)] hover:text-[#6B3A2A]"
+                  onClick={() =>
+                    updateSeries(series.id, {
+                      maps: (series.maps ?? []).filter((x) => x.id !== m.id),
+                    })
+                  }
+                >
+                  Remove from bible
+                </button>
+              </li>
+            ))
           )}
         </ul>
       </section>

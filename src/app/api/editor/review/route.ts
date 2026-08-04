@@ -60,9 +60,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  if (body.kind !== "style" && body.kind !== "story" && body.kind !== "line") {
+  const kindRaw = String(body.kind);
+  if (kindRaw === "line") {
+    body.kind = "style";
+  } else if (kindRaw !== "style" && kindRaw !== "story") {
     return NextResponse.json(
-      { error: 'kind must be "style", "story", or "line".' },
+      { error: 'kind must be "style" or "story".' },
       { status: 400 },
     );
   }

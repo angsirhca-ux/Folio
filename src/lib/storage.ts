@@ -46,6 +46,7 @@ import {
   ensureDevelopmentalEditor,
 } from "./developmentalEditor";
 import { emptyBetaReaders, ensureBetaReaders } from "./betaReaders";
+import { emptyCritique, ensureCritique } from "./critique";
 import { emptyDump, ensureBookDump } from "./dump";
 import { emptyStoryMap, ensureBookMap, sampleMapForLocations } from "./map";
 import { emptyGoals, ensureBookGoals } from "./goals";
@@ -92,6 +93,7 @@ export function createEmptyBook(): Book {
     activeMapId: map.id,
     developmentalEditor: emptyDevelopmentalEditor(),
     betaReaders: emptyBetaReaders(),
+    critique: emptyCritique(),
     dump: emptyDump(),
     seriesId: null,
     plotThreads: [],
@@ -370,6 +372,7 @@ export function createSampleBook(): Book {
     activeMapId: "",
     developmentalEditor: emptyDevelopmentalEditor(),
     betaReaders: emptyBetaReaders(),
+    critique: emptyCritique(),
     dump: emptyDump(),
     seriesId: null,
     plotThreads: [],
@@ -425,6 +428,7 @@ function hydrateBook(
     trash?: Book["trash"];
     developmentalEditor?: Book["developmentalEditor"];
     betaReaders?: Book["betaReaders"];
+    critique?: Book["critique"];
     dump?: Book["dump"];
     map?: Book["map"];
     maps?: Book["maps"];
@@ -435,41 +439,43 @@ function hydrateBook(
   },
 ): Book {
   return ensureBookDump(
-    ensureBetaReaders(
-      ensureBookPlotThreads(
-        ensureBookGoals(
-          ensureBookMap(
-            ensureDevelopmentalEditor(
-              ensureBookTrash(
-                ensureBookChronicle(
-                  syncEncyclopediaFromManuscript(
-                    ensureBookResearch(
-                      ensureBookEncyclopedia(
-                        ensureBookFamilyTrees(
-                          ensureBookLocations(
-                            ensureBookCharacters({
-                              ...book,
-                              seriesId: book.seriesId ?? null,
-                              plotThreads: book.plotThreads ?? [],
-                              map: book.map ?? emptyStoryMap(),
-                              maps: book.maps,
-                              activeMapId: book.activeMapId,
-                              encyclopedia: book.encyclopedia ?? [],
-                              encyclopediaStacks: book.encyclopediaStacks ?? [],
-                              chronicle: book.chronicle ?? [],
-                              familyTrees: book.familyTrees ?? [],
-                              research: book.research ?? [],
-                              chapters: book.chapters.map((c) =>
-                                withScenes(
-                                  syncChapterTitleField({
-                                    ...c,
-                                    summary: c.summary ?? "",
-                                    notes: c.notes ?? "",
-                                    scenes: c.scenes ?? [],
-                                  }),
+    ensureCritique(
+      ensureBetaReaders(
+        ensureBookPlotThreads(
+          ensureBookGoals(
+            ensureBookMap(
+              ensureDevelopmentalEditor(
+                ensureBookTrash(
+                  ensureBookChronicle(
+                    syncEncyclopediaFromManuscript(
+                      ensureBookResearch(
+                        ensureBookEncyclopedia(
+                          ensureBookFamilyTrees(
+                            ensureBookLocations(
+                              ensureBookCharacters({
+                                ...book,
+                                seriesId: book.seriesId ?? null,
+                                plotThreads: book.plotThreads ?? [],
+                                map: book.map ?? emptyStoryMap(),
+                                maps: book.maps,
+                                activeMapId: book.activeMapId,
+                                encyclopedia: book.encyclopedia ?? [],
+                                encyclopediaStacks: book.encyclopediaStacks ?? [],
+                                chronicle: book.chronicle ?? [],
+                                familyTrees: book.familyTrees ?? [],
+                                research: book.research ?? [],
+                                chapters: book.chapters.map((c) =>
+                                  withScenes(
+                                    syncChapterTitleField({
+                                      ...c,
+                                      summary: c.summary ?? "",
+                                      notes: c.notes ?? "",
+                                      scenes: c.scenes ?? [],
+                                    }),
+                                  ),
                                 ),
-                              ),
-                            } as Book),
+                              } as Book),
+                            ),
                           ),
                         ),
                       ),

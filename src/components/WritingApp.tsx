@@ -15,11 +15,13 @@ import {
   Sparkles,
   Tags,
   Users,
+  ClipboardCheck,
 } from "lucide-react";
 import type { Editor } from "@tiptap/react";
 import { BookPage } from "@/components/BookPage/BookPage";
 import { ChapterSidebar } from "@/components/ChapterSidebar/ChapterSidebar";
 import { BetaReadersPanel } from "@/components/Editor/BetaReadersPanel";
+import { CritiquePanel } from "@/components/Editor/CritiquePanel";
 import { DevelopmentalPanel } from "@/components/Editor/DevelopmentalPanel";
 import { BackupDialog } from "@/components/Backup/BackupDialog";
 import { ExportDialog } from "@/components/Export/ExportDialog";
@@ -63,6 +65,7 @@ export function WritingApp() {
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
   const [betaOpen, setBetaOpen] = useState(false);
+  const [critiqueOpen, setCritiqueOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [inspectorSceneId, setInspectorSceneId] = useState<string | null>(null);
   const [researchOpen, setResearchOpen] = useState(false);
@@ -101,6 +104,7 @@ export function WritingApp() {
     setGoalsOpen(false);
     setEditorOpen(false);
     setBetaOpen(false);
+    setCritiqueOpen(false);
     setResearchOpen(false);
     setEncyclopediaOpen(false);
     setInspectorSceneId(resolveInspectorSceneId());
@@ -112,6 +116,7 @@ export function WritingApp() {
     setGoalsOpen(false);
     setEditorOpen(false);
     setBetaOpen(false);
+    setCritiqueOpen(false);
     setInspectorOpen(false);
     setEncyclopediaOpen(false);
     setResearchOpen(true);
@@ -122,6 +127,7 @@ export function WritingApp() {
     setGoalsOpen(false);
     setEditorOpen(false);
     setBetaOpen(false);
+    setCritiqueOpen(false);
     setInspectorOpen(false);
     setResearchOpen(false);
     setEncyclopediaOpen(true);
@@ -153,6 +159,7 @@ export function WritingApp() {
       onToggleNotes: () => {
         setEditorOpen(false);
         setBetaOpen(false);
+        setCritiqueOpen(false);
         setInspectorOpen(false);
         setGoalsOpen(false);
         setResearchOpen(false);
@@ -162,6 +169,7 @@ export function WritingApp() {
       onToggleGoals: () => {
         setEditorOpen(false);
         setBetaOpen(false);
+        setCritiqueOpen(false);
         setInspectorOpen(false);
         setNotesOpen(false);
         setResearchOpen(false);
@@ -259,6 +267,11 @@ export function WritingApp() {
       (r) => r.chapterId === activeChapter.id,
     ),
   );
+  const hasCritiqueReview = Boolean(
+    (book.critique?.reviews ?? []).some(
+      (r) => r.chapterId === activeChapter.id,
+    ),
+  );
 
   return (
     <AppShell
@@ -312,6 +325,7 @@ export function WritingApp() {
           onClick={() => {
             setEditorOpen(false);
             setBetaOpen(false);
+            setCritiqueOpen(false);
             setInspectorOpen(false);
             setResearchOpen(false);
             setEncyclopediaOpen(false);
@@ -381,6 +395,7 @@ export function WritingApp() {
             setEncyclopediaOpen(false);
             setGoalsOpen(false);
             setBetaOpen(false);
+            setCritiqueOpen(false);
             setEditorOpen(true);
           }}
           className={hasEditorFlags || editorOpen ? "text-[var(--accent)]" : ""}
@@ -399,6 +414,7 @@ export function WritingApp() {
             setEncyclopediaOpen(false);
             setGoalsOpen(false);
             setEditorOpen(false);
+            setCritiqueOpen(false);
             setActiveReviewFlagId(null);
             setBetaOpen(true);
           }}
@@ -406,6 +422,28 @@ export function WritingApp() {
           title="Beta readers — memory across chapters, reactions only"
         >
           <Users className="h-4 w-4" strokeWidth={1.5} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Critique"
+          onClick={() => {
+            setNotesOpen(false);
+            setInspectorOpen(false);
+            setResearchOpen(false);
+            setEncyclopediaOpen(false);
+            setGoalsOpen(false);
+            setEditorOpen(false);
+            setBetaOpen(false);
+            setActiveReviewFlagId(null);
+            setCritiqueOpen(true);
+          }}
+          className={
+            hasCritiqueReview || critiqueOpen ? "text-[var(--accent)]" : ""
+          }
+          title="Critique — checklist only, never rewrites"
+        >
+          <ClipboardCheck className="h-4 w-4" strokeWidth={1.5} />
         </Button>
         <Button
           variant="ghost"
@@ -446,7 +484,12 @@ export function WritingApp() {
         data-folio-scroll
         className={cn(
           "folio-scroll relative z-10 h-screen overflow-y-auto transition-[padding] duration-400 ease-[cubic-bezier(0.25,0.1,0.25,1)]",
-          editorOpen || betaOpen || inspectorOpen || researchOpen || encyclopediaOpen
+          editorOpen ||
+            betaOpen ||
+            critiqueOpen ||
+            inspectorOpen ||
+            researchOpen ||
+            encyclopediaOpen
             ? "lg:pr-[26rem]"
             : "",
         )}
@@ -489,6 +532,7 @@ export function WritingApp() {
         setNotesOpen(false);
         setEditorOpen(false);
         setBetaOpen(false);
+        setCritiqueOpen(false);
         setInspectorOpen(false);
         setResearchOpen(false);
         setEncyclopediaOpen(false);
@@ -530,6 +574,11 @@ export function WritingApp() {
       <BetaReadersPanel
         open={betaOpen}
         onClose={() => setBetaOpen(false)}
+      />
+      <CritiquePanel
+        open={critiqueOpen}
+        onClose={() => setCritiqueOpen(false)}
+        editor={editor}
       />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />

@@ -29,11 +29,17 @@ import {
 } from "@/lib/types";
 import { ContinuityNotesSection } from "@/components/Bible/ContinuityNotesSection";
 import { MembershipChecklist } from "@/components/Bible/MembershipChecklist";
+import {
+  createMapPin,
+  mapsPinningLocation,
+  pinForLocation,
+} from "@/lib/map";
 
 const SECTIONS = [
   { id: "overview", label: "Overview" },
   { id: "sensory", label: "Sensory" },
   { id: "place", label: "Place" },
+  { id: "map", label: "Map" },
   { id: "story", label: "Story" },
   { id: "people", label: "People" },
   { id: "connections", label: "Links" },
@@ -53,6 +59,8 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
     updateLocationConnection,
     removeLocationConnection,
     setLocationBelongsToEntries,
+    upsertMapPin,
+    setActiveStoryMap,
     focusScene,
     promoteLocationToSeriesBible,
   } = useBook();
@@ -73,6 +81,16 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
   const appearances = useMemo(
     () => (location ? locationAppearances(book.chapters, location) : []),
     [book.chapters, location],
+  );
+
+  const mapsWithPin = useMemo(
+    () => mapsPinningLocation(book, locationId),
+    [book, locationId],
+  );
+
+  const activeMapPin = useMemo(
+    () => pinForLocation(book.map, locationId),
+    [book.map, locationId],
   );
 
   const onApplyEnrichment = useCallback(
@@ -394,7 +412,68 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
             />
           </WikiSection>
 
-          <WikiSection id="story" title="Story" index={3}>
+          <WikiSection id="map" title="On the map" index={3}>
+            <p className="font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-faint)]">
+              Geography corkboard — pin this place so it sits against the story.
+            </p>
+            {mapsWithPin.length > 0 ? (
+              <ul className="mt-4 space-y-2">
+                {mapsWithPin.map((m) => (
+                  <li
+                    key={m.id}
+                    className="flex flex-wrap items-center justify-between gap-2"
+                  >
+                    <span className="font-[family-name:var(--font-display)] text-lg text-[var(--ink)]">
+                      {m.name || "Map"}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="rounded-full text-xs"
+                      onClick={() => {
+                        if (m.id !== book.activeMapId) {
+                          setActiveStoryMap(m.id);
+                        }
+                        router.push(`/map?focus=${locationId}`);
+                      }}
+                    >
+                      Open on map
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-4 font-[family-name:var(--font-ui)] text-sm italic text-[var(--ink-faint)]">
+                Not pinned on any map yet.
+              </p>
+            )}
+            {!activeMapPin ? (
+              <Button
+                type="button"
+                size="sm"
+                className="mt-4 rounded-full"
+                onClick={() => {
+                  upsertMapPin(createMapPin(locationId, 0.5, 0.5));
+                  router.push(`/map?focus=${locationId}`);
+                }}
+              >
+                Place on active map
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-4 rounded-full"
+                onClick={() => router.push(`/map?focus=${locationId}`)}
+              >
+                Jump to pin
+              </Button>
+            )}
+          </WikiSection>
+
+          <WikiSection id="story" title="Story" index={4}>
             <WikiField
               label="Function"
               hint="What this place does in the plot."
@@ -425,7 +504,7 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
             />
           </WikiSection>
 
-          <WikiSection id="people" title="People" index={4}>
+          <WikiSection id="people" title="People" index={5}>
             <WikiField
               label="Who belongs here"
               hint="Names from the cast who inhabit or frequent this place."
@@ -443,7 +522,7 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
             />
           </WikiSection>
 
-          <WikiSection id="connections" title="Links" index={5}>
+          <WikiSection id="connections" title="Links" index={6}>
             <MembershipChecklist
               label="Belongs to"
               hint="Encyclopedia cards this place is part of — region, institution, sacred site."
@@ -587,14 +666,14 @@ export function LocationWikiPage({ locationId }: { locationId: string }) {
             </div>
           </WikiSection>
 
-          <WikiSection id="continuity" title="As-of notes" index={6}>
+          <WikiSection id="continuity" title="As-of notes" index={7}>
             <ContinuityNotesSection
               notes={location.continuityNotes ?? []}
               onChange={(continuityNotes) => patch({ continuityNotes })}
             />
           </WikiSection>
 
-          <WikiSection id="appearances" title="On the page" index={7}>
+          <WikiSection id="appearances" title="On the page" index={8}>
             <LocationAppearancesRail
               appearances={appearances}
               onOpenScene={focusScene}

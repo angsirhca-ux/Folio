@@ -284,6 +284,12 @@ export function ChroniclePage() {
                           hrefFor={(id) => `/locations/${id}`}
                           resolveName={(id) => locationById.get(id)?.name}
                         />
+
+                        <ChronicleMapPlacement
+                          eventId={event.id}
+                          mapMarker={event.mapMarker}
+                          linkedLocationIds={event.linkedLocationIds}
+                        />
                       </div>
                     ) : null}
                   </div>
@@ -293,6 +299,80 @@ export function ChroniclePage() {
           </ol>
         )}
       </div>
+    </div>
+  );
+}
+
+function ChronicleMapPlacement({
+  eventId,
+  mapMarker,
+  linkedLocationIds,
+}: {
+  eventId: string;
+  mapMarker?: { mapId: string; x: number; y: number };
+  linkedLocationIds: string[];
+}) {
+  const { book, updateChronicleEvent } = useBook();
+  const map = book.map;
+  if (!map) return null;
+
+  const pinFromLinked = (() => {
+    for (const locId of linkedLocationIds) {
+      const pin = map.pins.find((p) => p.locationId === locId);
+      if (pin) return pin;
+    }
+    return null;
+  })();
+
+  const placedHere = mapMarker?.mapId === map.id;
+
+  return (
+    <div>
+      <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
+        On the map
+      </p>
+      <p className="mt-1 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+        Optional — a soft marker on “{map.name}”, not a second atlas.
+      </p>
+      {placedHere ? (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <Link
+            href="/map"
+            className="font-[family-name:var(--font-ui)] text-xs text-[var(--accent)] hover:underline"
+          >
+            View on map
+          </Link>
+          <button
+            type="button"
+            className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)] hover:text-[#6B3A2A]"
+            onClick={() =>
+              updateChronicleEvent(eventId, { mapMarker: undefined })
+            }
+          >
+            Clear marker
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="font-[family-name:var(--font-ui)] text-xs text-[var(--accent)] hover:underline"
+            onClick={() =>
+              updateChronicleEvent(eventId, {
+                mapMarker: {
+                  mapId: map.id,
+                  x: pinFromLinked?.x ?? 0.5,
+                  y: pinFromLinked?.y ?? 0.5,
+                },
+              })
+            }
+          >
+            {pinFromLinked
+              ? "Place near linked place"
+              : "Place on map (center)"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

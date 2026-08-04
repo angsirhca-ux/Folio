@@ -230,6 +230,7 @@ export function ensureBookCharacters(
     trash?: Book["trash"];
     developmentalEditor?: Book["developmentalEditor"];
     betaReaders?: Book["betaReaders"];
+    critique?: Book["critique"];
     dump?: Book["dump"];
   },
 ): Book {
@@ -245,6 +246,10 @@ export function ensureBookCharacters(
     },
     betaReaders: book.betaReaders ?? {
       readers: [],
+      memory: [],
+      reviews: [],
+    },
+    critique: book.critique ?? {
       memory: [],
       reviews: [],
     },

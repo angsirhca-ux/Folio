@@ -44,6 +44,7 @@ export function ensureBookTrash(
     trash?: TrashItem[];
     developmentalEditor?: Book["developmentalEditor"];
     betaReaders?: Book["betaReaders"];
+    critique?: Book["critique"];
     dump?: Book["dump"];
   },
 ): Book {
@@ -56,6 +57,10 @@ export function ensureBookTrash(
     },
     betaReaders: book.betaReaders ?? {
       readers: [],
+      memory: [],
+      reviews: [],
+    },
+    critique: book.critique ?? {
       memory: [],
       reviews: [],
     },

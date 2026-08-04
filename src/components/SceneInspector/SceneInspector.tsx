@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { X } from "lucide-react";
+import { MapPin, X } from "lucide-react";
 import { WikiField } from "@/components/Characters/WikiField";
 import { Button } from "@/components/ui/button";
 import { useBook } from "@/providers/BookProvider";
@@ -59,6 +60,19 @@ export function SceneInspector({
     .map((l) => l.name)
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b));
+
+  const sceneLocationMatch = (() => {
+    const name = scene?.location?.trim();
+    if (!name) return null;
+    const location = (book.locations ?? []).find(
+      (l) => l.name.trim().toLowerCase() === name.toLowerCase(),
+    );
+    if (!location) return null;
+    const map = book.map;
+    const pin = map?.pins?.find((p) => p.locationId === location.id);
+    if (!pin || !map) return null;
+    return { locationId: location.id, locationName: location.name };
+  })();
 
   const mins = scene ? readingMinutes(scene.wordCount) : 0;
 
@@ -200,6 +214,15 @@ export function SceneInspector({
                   names={locationNames}
                   onPick={(name) => updateScene(scene.id, { location: name })}
                 />
+              ) : null}
+              {sceneLocationMatch ? (
+                <Link
+                  href={`/map?focus=${sceneLocationMatch.locationId}`}
+                  className="inline-flex items-center gap-1.5 font-[family-name:var(--font-ui)] text-xs text-[var(--accent)] hover:underline"
+                >
+                  <MapPin className="h-3 w-3" strokeWidth={1.5} />
+                  Show on map
+                </Link>
               ) : null}
 
               <WikiField

@@ -203,7 +203,7 @@ export function buildMapLayoutContext(
 
   const preamble = [
     `Manuscript: ${book.title || "Untitled"}`,
-    `Task: Place each location on a 2D story map (x,y in 0–1) so relative positions match the prose and atlas notes. Also paint terrain regions (territory / mountains / water) when the story implies them.`,
+    `Task: Place each location on a 2D story map (x,y in 0–1) so relative positions match the prose and atlas notes. Also paint terrain regions (territory / mountains / water / building) when the story implies them.`,
     `Convention: x increases eastward (0=west, 1=east). y increases southward (0=north/top, 1=south/bottom) — like a page.`,
     `Keep related/near places closer; distant/journey-apart places farther. Interiors of the same building may cluster.`,
     `Preserve relative distances carefully — do not flatten the whole atlas into a uniform grid.`,
@@ -279,7 +279,7 @@ export const layoutMapTool: Anthropic.Tool = {
             name: { type: "string" },
             kind: {
               type: "string",
-              enum: ["territory", "mountains", "water"],
+              enum: ["territory", "mountains", "water", "building"],
             },
             x: { type: "number", description: "Top-left x 0–1" },
             y: { type: "number", description: "Top-left y 0–1" },
@@ -389,7 +389,10 @@ export function normalizeMapLayoutPayload(
   const regions: MapLayoutRegion[] = [];
   for (const r of raw?.regions ?? []) {
     const kind =
-      r.kind === "mountains" || r.kind === "water" || r.kind === "territory"
+      r.kind === "mountains" ||
+      r.kind === "water" ||
+      r.kind === "building" ||
+      r.kind === "territory"
         ? r.kind
         : null;
     if (!kind) continue;
@@ -501,8 +504,21 @@ export function applyMapLayout(
   const authorRegions = (next.regions ?? []).filter(
     (r) => (r.source ?? "author") !== "claude",
   );
-  const claudeRegions: StoryMapRegion[] = (layout.regions ?? []).map((r) =>
-    createMapRegion({
+  const claudeRegions: StoryMapRegion[] = (layout.regions ?? []).map((r) => {
+    if (r.kind === "mountains" || r.kind === "water" || r.kind === "building") {
+      // Place as a point icon at the center of the suggested box.
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+      return createMapRegion({
+        name: r.name,
+        kind: r.kind,
+        x: cx,
+        y: cy,
+        color: r.color ?? MAP_REGION_KIND_META[r.kind].defaultColor,
+        source: "claude",
+      });
+    }
+    return createMapRegion({
       name: r.name,
       kind: r.kind,
       x: r.x,
@@ -513,8 +529,8 @@ export function applyMapLayout(
       shape: r.shape,
       color: r.color ?? MAP_REGION_KIND_META[r.kind].defaultColor,
       source: "claude",
-    }),
-  );
+    });
+  });
   next = { ...next, regions: [...authorRegions, ...claudeRegions] };
 
   return expand ? expandMapPins(next) : next;
@@ -570,7 +586,7 @@ export function applyMapLayoutConnections(
 
 export const MAP_LAYOUT_SYSTEM = `You are a literary cartographer for novelists. You never rewrite manuscript prose.
 You arrange atlas locations on a 2D story map using evidence from the manuscript and location notes.
-You may also paint terrain regions (territory, mountains, water) when the story clearly implies them.
+You may also paint terrain regions (territory, mountains, water, building) when the story clearly implies them.
 
 Rules:
 - Use exact locationId values from the atlas list — never invent ids.

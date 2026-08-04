@@ -27,6 +27,48 @@ export function emptyDevelopmentalEditor(): DevelopmentalEditorState {
   return { memory: [], passes: [] };
 }
 
+/** Map legacy Line Edit / show-dont-tell into Style & Story. */
+function migratePassKind(kind: string | undefined): DevelopmentalPassKind {
+  if (kind === "story" || kind === "continuity" || kind === "style") return kind;
+  if (kind === "line") return "style";
+  return "style";
+}
+
+function migrateFlagCategory(
+  raw: string | undefined,
+): DevelopmentalFlagCategory | null {
+  if (!raw) return null;
+  if (raw === "show-dont-tell") return "telling";
+  if (
+    (
+      [
+        "filter-words",
+        "weak-verbs",
+        "repetition",
+        "dialogue-tags",
+        "adverbs",
+        "flow-rhythm",
+        "redundancy",
+        "word-choice",
+        "dialogue-polish",
+        "telling",
+        "pacing",
+        "plot-holes",
+        "character-voice",
+        "name-variants",
+        "cast-mismatch",
+        "location-jump",
+        "timeline",
+        "forgotten-detail",
+        "orphan-tag",
+      ] as string[]
+    ).includes(raw)
+  ) {
+    return raw as DevelopmentalFlagCategory;
+  }
+  return null;
+}
+
 export function ensureDevelopmentalEditor(
   book: Omit<Book, "developmentalEditor" | "betaReaders" | "dump"> & {
     developmentalEditor?: DevelopmentalEditorState;
@@ -35,14 +77,34 @@ export function ensureDevelopmentalEditor(
   },
 ): Book {
   const raw = book.developmentalEditor;
+  const memory = (Array.isArray(raw?.memory) ? raw.memory : []).map((m) => ({
+    ...m,
+    kind:
+      m.kind === "general" || m.kind === "preference"
+        ? m.kind
+        : migratePassKind(String(m.kind)),
+  }));
+  const passes = (Array.isArray(raw?.passes) ? raw.passes : []).map((p) => ({
+    ...p,
+    kind: migratePassKind(String(p.kind)),
+    flags: (p.flags ?? [])
+      .map((f) => {
+        const category = migrateFlagCategory(f.category);
+        if (!category) return null;
+        return { ...f, category };
+      })
+      .filter(Boolean) as DevelopmentalFlag[],
+  }));
+
   return {
     ...book,
-    developmentalEditor: {
-      memory: Array.isArray(raw?.memory) ? raw.memory : [],
-      passes: Array.isArray(raw?.passes) ? raw.passes : [],
-    },
+    developmentalEditor: { memory, passes },
     betaReaders: book.betaReaders ?? {
       readers: [],
+      memory: [],
+      reviews: [],
+    },
+    critique: book.critique ?? {
       memory: [],
       reviews: [],
     },
@@ -122,6 +184,10 @@ const STYLE_CATEGORIES: DevelopmentalFlagCategory[] = [
   "repetition",
   "dialogue-tags",
   "adverbs",
+  "flow-rhythm",
+  "redundancy",
+  "word-choice",
+  "dialogue-polish",
 ];
 
 const STORY_CATEGORIES: DevelopmentalFlagCategory[] = [
@@ -131,20 +197,11 @@ const STORY_CATEGORIES: DevelopmentalFlagCategory[] = [
   "character-voice",
 ];
 
-const LINE_CATEGORIES: DevelopmentalFlagCategory[] = [
-  "flow-rhythm",
-  "redundancy",
-  "word-choice",
-  "dialogue-polish",
-  "show-dont-tell",
-];
-
 export function categoriesForPass(
   kind: DevelopmentalPassKind,
 ): DevelopmentalFlagCategory[] {
   if (kind === "style") return STYLE_CATEGORIES;
   if (kind === "story") return STORY_CATEGORIES;
-  if (kind === "line") return LINE_CATEGORIES;
   return [
     "name-variants",
     "cast-mismatch",
@@ -156,9 +213,8 @@ export function categoriesForPass(
 }
 
 export function chapterPassLabel(kind: DevelopmentalPassKind): string {
-  if (kind === "style") return "Style & Mechanics";
+  if (kind === "style") return "Style & Line";
   if (kind === "story") return "Story & Structure";
-  if (kind === "line") return "Line Edit";
   return "Continuity";
 }
 
@@ -171,24 +227,11 @@ export function coerceFlagCategory(
   if (raw && (allowed as string[]).includes(raw)) {
     return raw as DevelopmentalFlagCategory;
   }
-  if (kind === "line") {
-    if (raw === "telling" || raw === "pacing") return "show-dont-tell";
-    if (raw === "repetition" || raw === "filter-words" || raw === "adverbs") {
-      return "redundancy";
-    }
-    if (raw === "weak-verbs") return "word-choice";
-    if (raw === "dialogue-tags" || raw === "character-voice") {
-      return "dialogue-polish";
-    }
-  }
-  if (kind === "style") {
-    if (raw === "redundancy") return "repetition";
-    if (raw === "word-choice") return "weak-verbs";
-    if (raw === "dialogue-polish") return "dialogue-tags";
-    if (raw === "show-dont-tell" || raw === "flow-rhythm") return "filter-words";
+  // Legacy Line Edit category
+  if (raw === "show-dont-tell") {
+    return kind === "story" ? "telling" : null;
   }
   if (kind === "story") {
-    if (raw === "show-dont-tell") return "telling";
     if (raw === "dialogue-polish" || raw === "dialogue-tags") {
       return "character-voice";
     }
@@ -243,10 +286,11 @@ export function normalizeReviewPayload(
       kind:
         m.kind === "style" ||
         m.kind === "story" ||
-        m.kind === "line" ||
         m.kind === "continuity"
           ? m.kind
-          : "general",
+          : String(m.kind) === "line"
+            ? "style"
+            : "general",
       text: m.text.trim().slice(0, 400),
     }));
 
@@ -518,7 +562,7 @@ export function buildReviewContext(args: {
     .join("\n");
   const { preferencesBlock, generalBlock } = formatMemoryBlocks(args.memory);
   const voiceBible =
-    args.kind === "story" || args.kind === "line"
+    args.kind === "story" || args.kind === "style"
       ? buildCharacterVoiceSnippets(
           args.book.characters ?? [],
           args.chapter,
@@ -574,37 +618,30 @@ HARD RULES:
   if (kind === "style") {
     return `${shared}
 
-STYLE & MECHANICS — look only for:
+STYLE & LINE — line-level craft for this chapter only. Look for:
+
+Mechanics
 1. filter-words — sensory/cognitive filters: saw, heard, noticed, felt, thought, realized, watched, seemed, appeared, etc.
 2. weak-verbs — passive voice, or limp verbs propped up by adverbs.
 3. repetition — words, phrases, or sentence openings used too often in this chapter.
 4. dialogue-tags — tags other than said, or missing action beats when tags strain.
 5. adverbs — excessive -ly modifiers, especially with dialogue or weak verbs.
 
+Prose & dialogue
+6. flow-rhythm — awkward structure; monotonous cadence; places that need varied sentence length.
+7. redundancy — filler and repeated constructions that slow the action (beyond simple word repeats).
+8. word-choice — vague adjectives or limp diction (diagnose; do not paste a rewritten sentence).
+9. dialogue-polish — unnatural or indistinct dialogue / clunky tags; use the voice bible when provided.
+
 For each real instance, add a flag with that line’s excerpt — do not only summarize patterns in the summary. Use only the category ids above. Soft cap ~${MAX_FLAGS_PER_PASS} if the chapter is dense with repeats.
 
-Ignore story/plot/character-arc concerns on this pass.`;
-  }
-
-  if (kind === "line") {
-    return `${shared}
-
-LINE EDIT — this chapter only. Flag real line-level issues (not every sentence for sport). Look for:
-
-1. flow-rhythm — awkward structure; monotonous cadence; places that need varied sentence length.
-2. redundancy — repetitive words, filler, and filter constructions that slow the action.
-3. word-choice — weak verbs and vague adjectives (diagnose; do not paste a rewritten sentence).
-4. dialogue-polish — unnatural or indistinct dialogue / clunky tags; use the voice bible when provided.
-5. show-dont-tell — heavy exposition that could become action, emotion, or sensory detail.
-
-Add a flag for each distinct problem with a short excerpt. Use only the category ids above. Soft cap ~${MAX_FLAGS_PER_PASS} — prefer distinct moments over identical repeats.
-Stay at the line level — no plot holes, world-rule breaks, or book-wide continuity.`;
+Ignore story/plot/character-arc and show-vs-tell (those belong to Story & Structure). Stay at the line level — no plot holes, world-rule breaks, or book-wide continuity.`;
   }
 
   return `${shared}
 
 STORY & STRUCTURE — look only for:
-1. telling — narrative summary where a scene could play out in moment-to-moment action or dialogue.
+1. telling — narrative summary where a scene could play out in moment-to-moment action or dialogue (show vs tell).
 2. pacing — sudden speed-ups, or slow paragraphs that drag without earning their weight.
 3. plot-holes — logic gaps, broken world rules (use memory + roster when helpful), or timeline slips visible in this chapter.
 4. character-voice — dialogue or interiority that collapses distinct characters into one voice, or drifts from the CHARACTER VOICE BIBLE when provided.
@@ -613,7 +650,7 @@ For character-voice flags: diagnose against this book's voice notes (speech, man
 
 Pick every clear story/structure issue (soft cap ~${MAX_FLAGS_PER_PASS}). Use only the category ids above.
 
-Ignore copy-edit minutiae (filter words, -ly counts) on this pass.`;
+Ignore copy-edit minutiae (filter words, -ly counts, rhythm) on this pass.`;
 }
 
 export function reviewToolForKind(kind: DevelopmentalPassKind) {
@@ -670,7 +707,7 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
             properties: {
               kind: {
                 type: "string",
-                enum: ["style", "story", "line", "general"],
+                enum: ["style", "story", "general"],
               },
               text: {
                 type: "string",

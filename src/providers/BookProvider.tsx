@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { AppSettings, Book, Chapter, Character, DevelopmentalMemoryNote, DevelopmentalPass, DumpPage, EncyclopediaEntry, EncyclopediaStack, FamilyTree, Location, PlotThread, ResearchEntry, StoryMap, StoryMapPin, StoryMapRegion, ThemeId, TrashedBook, BetaMemoryNote, BetaReview } from "@/lib/types";
+import type { AppSettings, Book, Chapter, Character, DevelopmentalMemoryNote, DevelopmentalPass, DumpPage, EncyclopediaEntry, EncyclopediaStack, FamilyTree, Location, PlotThread, ResearchEntry, StoryMap, StoryMapLabel, StoryMapPath, StoryMapPin, StoryMapRegion, ThemeId, TrashedBook, BetaMemoryNote, BetaReview, CritiqueMemoryNote, CritiqueReview } from "@/lib/types";
 import {
   createId,
   createBookInLibrary,
@@ -112,8 +112,13 @@ import {
   duplicateStoryMap as duplicateStoryMapOnBook,
   removePinFromMap,
   removeRegionFromMap,
+  removeLabelFromMap,
+  removePathFromMap,
   upsertPinOnMap,
   upsertRegionOnMap,
+  upsertLabelOnMap,
+  upsertPathOnMap,
+  applyMapStarter as applyMapStarterToMap,
 } from "@/lib/map";
 import {
   createResearchEntry,
@@ -157,6 +162,7 @@ import {
   mergeDevelopmentalPass,
 } from "@/lib/developmentalEditor";
 import { mergeBetaReview } from "@/lib/betaReaders";
+import { mergeCritiqueReview } from "@/lib/critique";
 import { createDumpPage, emptyDump } from "@/lib/dump";
 import {
   clampGoalTarget,
@@ -166,11 +172,13 @@ import {
   cloneSeriesCharacterIntoBook,
   cloneSeriesEncyclopediaIntoBook,
   cloneSeriesLocationIntoBook,
+  cloneSeriesMapIntoBook,
   createSeries as createSeriesRecord,
   findSeries,
   promoteCharacterToSeries,
   promoteEncyclopediaToSeries,
   promoteLocationToSeries,
+  promoteMapToSeries,
 } from "@/lib/series";
 import {
   setCharacterBelongsTo,
@@ -233,6 +241,7 @@ interface BookContextValue {
         | "locations"
         | "encyclopedia"
         | "encyclopediaStacks"
+        | "maps"
       >
     >,
   ) => void;
@@ -241,9 +250,11 @@ interface BookContextValue {
   bringSeriesCharacterIntoBook: (characterId: string) => string | null;
   bringSeriesLocationIntoBook: (locationId: string) => string | null;
   bringSeriesEncyclopediaIntoBook: (entryId: string) => string | null;
+  bringSeriesMapIntoBook: (mapId: string) => string | null;
   promoteCharacterToSeriesBible: (characterId: string) => void;
   promoteLocationToSeriesBible: (locationId: string) => void;
   promoteEncyclopediaToSeriesBible: (entryId: string) => void;
+  promoteMapToSeriesBible: (mapId?: string) => void;
   updateGoals: (partial: Partial<BookGoals>) => void;
   /** Words written since this browser session opened the book. */
   sessionWords: number;
@@ -374,8 +385,14 @@ interface BookContextValue {
   removeMapPin: (locationIdOrPinId: string) => void;
   upsertMapRegion: (region: StoryMapRegion) => void;
   removeMapRegion: (regionId: string) => void;
+  upsertMapLabel: (label: StoryMapLabel) => void;
+  removeMapLabel: (labelId: string) => void;
+  upsertMapPath: (path: StoryMapPath) => void;
+  removeMapPath: (pathId: string) => void;
   /** Place every unpinned atlas location on the corkboard. */
   autoPlaceMapPins: () => void;
+  /** Seed the empty board from a map starter pack (city, new world…). */
+  applyMapStarter: (starterId: string) => void;
   /** Add a blank map and switch to it. Returns the new map id. */
   addStoryMap: (name?: string) => string;
   setActiveStoryMap: (mapId: string) => void;
@@ -494,6 +511,13 @@ interface BookContextValue {
   ) => void;
   clearBetaMemory: () => void;
   clearBetaReviews: () => void;
+  /** Apply a critique checklist review. Never rewrites prose. */
+  applyCritiqueReview: (
+    review: CritiqueReview,
+    memoryUpdates: CritiqueMemoryNote[],
+  ) => void;
+  clearCritiqueMemory: () => void;
+  clearCritiqueReviews: () => void;
   selectDumpPage: (pageId: string) => void;
   addDumpPage: (title?: string) => string;
   deleteDumpPage: (pageId: string) => void;
@@ -1349,6 +1373,18 @@ export function BookProvider({ children }: { children: ReactNode }) {
         });
         return createdId;
       },
+      bringSeriesMapIntoBook: (mapId) => {
+        const series = findSeries(librarySeries, book.seriesId);
+        const seriesMap = series?.maps?.find((m) => m.id === mapId);
+        if (!series || !seriesMap) return null;
+        let createdId: string | null = null;
+        updateBook((b) => {
+          const result = cloneSeriesMapIntoBook(b, series, seriesMap);
+          createdId = result.map.id;
+          return result.book;
+        });
+        return createdId;
+      },
       promoteCharacterToSeriesBible: (characterId) => {
         const series = findSeries(librarySeries, book.seriesId);
         const character = book.characters.find((c) => c.id === characterId);
@@ -1374,6 +1410,18 @@ export function BookProvider({ children }: { children: ReactNode }) {
           entry,
           book.encyclopediaStacks ?? [],
         );
+        const lib = upsertSeriesInLibrary(next);
+        setLibrarySeries(lib.series ?? []);
+      },
+      promoteMapToSeriesBible: (mapId) => {
+        const series = findSeries(librarySeries, book.seriesId);
+        if (!series) return;
+        const target =
+          (mapId
+            ? (book.maps ?? []).find((m) => m.id === mapId)
+            : book.map) ?? book.map;
+        if (!target) return;
+        const next = promoteMapToSeries(series, book, target);
         const lib = upsertSeriesInLibrary(next);
         setLibrarySeries(lib.series ?? []);
       },
@@ -1936,12 +1984,52 @@ export function BookProvider({ children }: { children: ReactNode }) {
             removeRegionFromMap(ensured.map, regionId),
           );
         }),
+      upsertMapLabel: (label) =>
+        updateBook((b) => {
+          const ensured = ensureBookMap(b);
+          return replaceActiveMap(
+            ensured,
+            upsertLabelOnMap(ensured.map, label),
+          );
+        }),
+      removeMapLabel: (labelId) =>
+        updateBook((b) => {
+          const ensured = ensureBookMap(b);
+          return replaceActiveMap(
+            ensured,
+            removeLabelFromMap(ensured.map, labelId),
+          );
+        }),
+      upsertMapPath: (path) =>
+        updateBook((b) => {
+          const ensured = ensureBookMap(b);
+          return replaceActiveMap(
+            ensured,
+            upsertPathOnMap(ensured.map, path),
+          );
+        }),
+      removeMapPath: (pathId) =>
+        updateBook((b) => {
+          const ensured = ensureBookMap(b);
+          return replaceActiveMap(
+            ensured,
+            removePathFromMap(ensured.map, pathId),
+          );
+        }),
       autoPlaceMapPins: () =>
         updateBook((b) => {
           const ensured = ensureBookMap(b);
           return replaceActiveMap(
             ensured,
             autoPlaceUnpinned(ensured.map, ensured.locations ?? []),
+          );
+        }),
+      applyMapStarter: (starterId) =>
+        updateBook((b) => {
+          const ensured = ensureBookMap(b);
+          return replaceActiveMap(
+            ensured,
+            applyMapStarterToMap(ensured.map, starterId),
           );
         }),
       addStoryMap: (name) => {
@@ -2425,17 +2513,20 @@ export function BookProvider({ children }: { children: ReactNode }) {
         updateBook((b) => ({
           ...b,
           chronicle: sortChronicleEvents(
-            (b.chronicle ?? []).map((e) =>
-              e.id === eventId
-                ? {
-                    ...e,
-                    ...partial,
-                    id: e.id,
-                    createdAt: e.createdAt,
-                    updatedAt: Date.now(),
-                  }
-                : e,
-            ),
+            (b.chronicle ?? []).map((e) => {
+              if (e.id !== eventId) return e;
+              const next = {
+                ...e,
+                ...partial,
+                id: e.id,
+                createdAt: e.createdAt,
+                updatedAt: Date.now(),
+              };
+              if ("mapMarker" in partial && partial.mapMarker == null) {
+                delete next.mapMarker;
+              }
+              return next;
+            }),
           ),
           updatedAt: Date.now(),
         })),
@@ -2522,6 +2613,31 @@ export function BookProvider({ children }: { children: ReactNode }) {
           ...b,
           betaReaders: {
             ...(b.betaReaders ?? { readers: [], memory: [], reviews: [] }),
+            reviews: [],
+          },
+        })),
+      applyCritiqueReview: (review, memoryUpdates) =>
+        updateBook((b) => ({
+          ...b,
+          critique: mergeCritiqueReview(
+            b.critique ?? { memory: [], reviews: [] },
+            review,
+            memoryUpdates,
+          ),
+        })),
+      clearCritiqueMemory: () =>
+        updateBook((b) => ({
+          ...b,
+          critique: {
+            ...(b.critique ?? { memory: [], reviews: [] }),
+            memory: [],
+          },
+        })),
+      clearCritiqueReviews: () =>
+        updateBook((b) => ({
+          ...b,
+          critique: {
+            ...(b.critique ?? { memory: [], reviews: [] }),
             reviews: [],
           },
         })),

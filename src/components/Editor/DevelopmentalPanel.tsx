@@ -10,7 +10,6 @@ import {
   CircleCheck,
   Feather,
   Loader2,
-  PenLine,
   Pin,
   ScanSearch,
   Waypoints,
@@ -39,7 +38,7 @@ import {
 import { cn } from "@/lib/utils";
 
 async function reviewChapter(
-  kind: "style" | "story" | "line",
+  kind: "style" | "story",
   book: {
     title: string;
     author: string;
@@ -134,7 +133,6 @@ function aiAbortErrorMessage(err: unknown): string {
 const PASS_TABS: DevelopmentalPassKind[] = [
   "style",
   "story",
-  "line",
   "continuity",
 ];
 
@@ -444,7 +442,7 @@ export function DevelopmentalPanel({
                     Runs
                   </span>
                   <span className="mt-0.5 block truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
-                    Style · Story & Structure · Line Edit · Continuity
+                    Style & Line · Story & Structure · Continuity
                   </span>
                 </span>
                 <ChevronDown
@@ -498,19 +496,6 @@ export function DevelopmentalPanel({
                         }
                         configured={claude?.configured ?? null}
                         onClick={() => void runPass("story")}
-                      />
-                      <PassButton
-                        kind="line"
-                        icon={
-                          <PenLine className="h-3.5 w-3.5" strokeWidth={1.5} />
-                        }
-                        busy={busyKind === "line"}
-                        elapsedSec={busyKind === "line" ? busyElapsedSec : 0}
-                        disabled={
-                          busyKind != null || claude?.configured === false
-                        }
-                        configured={claude?.configured ?? null}
-                        onClick={() => void runPass("line")}
                       />
                       <PassButton
                         kind="continuity"
@@ -567,12 +552,10 @@ export function DevelopmentalPanel({
                   )}
                 >
                   {kind === "style"
-                    ? "Style"
+                    ? "Style & Line"
                     : kind === "story"
                       ? "Story"
-                      : kind === "line"
-                        ? "Line"
-                        : "Continuity"}
+                      : "Continuity"}
                 </button>
               ))}
               <button
@@ -600,9 +583,7 @@ export function DevelopmentalPanel({
                     <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
                       {busyKind === "continuity"
                         ? "Reading the whole book…"
-                        : busyKind === "line"
-                          ? "Line editing this chapter…"
-                          : "Reading this chapter…"}
+                        : "Reading this chapter…"}
                     </p>
                     <p className="mt-1 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
                       Usually under a minute
@@ -737,19 +718,17 @@ export function DevelopmentalPanel({
                       : anyPassForChapter
                         ? `No ${
                             viewKind === "style"
-                              ? "style"
-                              : viewKind === "story"
-                                ? "story"
-                                : "line edit"
+                              ? "style & line"
+                              : "story"
                           } pass yet`
                         : "Ready when you are"}
                   </p>
                   <p className="mx-auto mt-2 max-w-[16rem] font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
                     {viewKind === "continuity"
                       ? "Run Continuity to scan the whole manuscript for name slips, cast gaps, place jumps, and timeline cracks — flags only."
-                      : viewKind === "line"
-                        ? "Run Line Edit on this chapter for flow, redundancy, diction, dialogue, and show-don’t-tell — flags only, never rewrites."
-                        : "Expand Runs above, then start Style or Story & Structure. The editor will flag issues without touching your words."}
+                      : viewKind === "style"
+                        ? "Run Style & Line on this chapter for mechanics, rhythm, diction, and dialogue polish — flags only, never rewrites."
+                        : "Expand Runs above, then start Style & Line or Story & Structure. The editor will flag issues without touching your words."}
                   </p>
                   {!passesOpen ? (
                     <button

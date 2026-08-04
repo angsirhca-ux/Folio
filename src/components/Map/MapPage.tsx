@@ -6,28 +6,38 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
+  Building2,
   Circle,
+  Clock,
   ImagePlus,
+  List,
   MapPin,
   Maximize2,
   Minus,
   Mountain,
+  Pentagon,
   Plus,
   RotateCcw,
   RotateCw,
+  Route,
   Sparkles,
   Square,
+  Type,
   Waves,
   X,
 } from "lucide-react";
+import { CityVectorBasemap } from "@/components/Map/CityVectorBasemap";
+import { MapFeatureIcon } from "@/components/Map/MapFeatureIcon";
+import { MapSwitcher } from "@/components/Map/MapSwitcher";
+import { SeriesBibleStrip } from "@/components/Series/SeriesBibleStrip";
 import { Button } from "@/components/ui/button";
 import { ClaudeDeepenButton } from "@/components/Characters/ClaudeDeepenButton";
-import { MapSwitcher } from "@/components/Map/MapSwitcher";
 import { useBook } from "@/providers/BookProvider";
 import {
   buildMapFromStoryWithClaude,
@@ -39,32 +49,63 @@ import {
 import {
   applyMapBackground,
   clearMapBackground,
+  createMapLabel,
+  createMapPath,
   createMapPin,
   createMapRegion,
   emptyStoryMap,
   expandMapPins,
+  isMapFeatureIcon,
+  isPolygonRegion,
+  MAP_PATH_KIND_META,
   MAP_REGION_KIND_META,
   MAP_REGION_SHAPE_META,
+  MAP_REGION_STROKE_META,
+  MAP_STARTERS,
+  MAP_LINE_ART_PAPER,
   MAP_TERRITORY_PALETTE,
+  featureMarkerStyle,
+  mapHasBasemap,
+  movePolygonVertex,
+  organicClipPath,
   pinBounds,
+  translatePolygonRegion,
   prepareMapBackground,
+  prepareMapStarter,
   regionOutlineStyle,
+  territoryStrokeStyle,
   territoryStyle,
   unplacedLocations,
 } from "@/lib/map";
 import {
   LOCATION_KIND_META,
   povColor,
+  type ChronicleEvent,
   type Location,
+  type StoryMapLabel,
+  type StoryMapPathKind,
   type StoryMapPin,
   type StoryMapRegion,
   type StoryMapRegionKind,
   type StoryMapRegionShape,
+  type StoryMapRegionStroke,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const DRAW_KINDS: StoryMapRegionKind[] = ["territory", "mountains", "water"];
-const REGION_SHAPES: StoryMapRegionShape[] = ["rect", "ellipse", "soft"];
+const DRAW_KINDS: StoryMapRegionKind[] = [
+  "territory",
+  "mountains",
+  "water",
+  "building",
+];
+const PATH_KINDS: StoryMapPathKind[] = ["road", "path", "river"];
+const REGION_SHAPES: StoryMapRegionShape[] = [
+  "rect",
+  "ellipse",
+  "soft",
+  "polygon",
+];
+const REGION_STROKES: StoryMapRegionStroke[] = ["none", "soft", "ink"];
 type ResizeHandle = "nw" | "ne" | "sw" | "se" | "n" | "s" | "e" | "w";
 
 const RESIZE_HANDLES: {
@@ -148,125 +189,18 @@ function normalizeDeg(deg: number): number {
   return Math.round(r * 10) / 10;
 }
 
-
-/** Simple map glyphs — peaks and wave lines, readable at a glance. */
-function RegionFeatureGlyphs({
-  kind,
-  regionId,
-  w,
-  h,
-}: {
-  kind: StoryMapRegionKind;
-  regionId: string;
-  w: number;
-  h: number;
-}) {
-  if (kind === "territory") return null;
-
-  if (kind === "mountains") {
-    const peaks = Math.min(8, Math.max(2, Math.round(w * 16)));
-    const rows = Math.min(3, Math.max(1, Math.round(h * 9)));
-    const glyphs: {
-      key: string;
-      left: string;
-      top: string;
-      size: number;
-    }[] = [];
-    for (let row = 0; row < rows; row++) {
-      const count = Math.max(2, peaks - row);
-      for (let i = 0; i < count; i++) {
-        const left = ((i + 0.55) / count) * 100 + (row % 2 === 1 ? 3.5 : 0);
-        const top = 30 + (row / Math.max(1, rows)) * 48;
-        const size = 22 + ((i * 3 + row * 5) % 11);
-        glyphs.push({
-          key: `${row}-${i}`,
-          left: `${Math.min(94, Math.max(6, left))}%`,
-          top: `${top}%`,
-          size,
-        });
-      }
-    }
-    return (
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        {glyphs.map((g) => (
-          <svg
-            key={g.key}
-            width={g.size}
-            height={g.size * 0.85}
-            viewBox="0 0 32 28"
-            className="absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: g.left, top: g.top }}
-            aria-hidden
-          >
-            <path
-              d="M2 26 L16 2 L30 26 Z"
-              fill="rgba(78,84,90,0.42)"
-              stroke="rgba(52,58,64,0.62)"
-              strokeWidth="1.4"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M10 26 L18 10 L26 26"
-              fill="none"
-              stroke="rgba(52,58,64,0.4)"
-              strokeWidth="1.1"
-              strokeLinejoin="round"
-            />
-            <path d="M16 2 L20 10 L16 8 L12 12 Z" fill="rgba(247,243,234,0.7)" />
-          </svg>
-        ))}
-      </div>
-    );
+function polygonWashFill(fill: string): string {
+  if (fill.startsWith("rgba(")) {
+    return fill.replace(/,\s*[\d.]+\)$/, ", 0.04)");
   }
-
-  const waveRows = Math.min(7, Math.max(3, Math.round(h * 20)));
-  const gradId = `water-sheen-${regionId}`;
-  return (
-    <svg
-      className="pointer-events-none absolute inset-0 h-full w-full overflow-hidden rounded-[1.75rem]"
-      viewBox="0 0 100 100"
-      preserveAspectRatio="none"
-      aria-hidden
-    >
-      <defs>
-        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="rgba(210,230,240,0.35)" />
-          <stop offset="55%" stopColor="rgba(70,130,160,0.12)" />
-          <stop offset="100%" stopColor="rgba(40,100,140,0.18)" />
-        </linearGradient>
-      </defs>
-      <rect width="100" height="100" fill={`url(#${gradId})`} />
-      {Array.from({ length: waveRows }, (_, i) => {
-        const y = 20 + ((i + 0.5) / waveRows) * 70;
-        const amp = 2.4 + (i % 3) * 0.45;
-        const phase = (i % 2) * 7;
-        const d = [
-          `M ${-8 + phase} ${y}`,
-          `Q ${10 + phase} ${y - amp} ${26 + phase} ${y}`,
-          `T ${54 + phase} ${y}`,
-          `T ${82 + phase} ${y}`,
-          `T ${110 + phase} ${y}`,
-        ].join(" ");
-        return (
-          <path
-            key={i}
-            d={d}
-            fill="none"
-            stroke={
-              i % 2 === 0 ? "rgba(40,100,135,0.48)" : "rgba(75,135,165,0.36)"
-            }
-            strokeWidth={1.5}
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        );
-      })}
-    </svg>
-  );
+  if (fill.startsWith("rgb(")) {
+    return fill.replace("rgb(", "rgba(").replace(")", ", 0.04)");
+  }
+  return fill;
 }
 
-const MIN_ZOOM = 0.45;
-const MAX_ZOOM = 4.5;
+const MIN_ZOOM = 0.35;
+const MAX_ZOOM = 6;
 
 type DragState =
   | {
@@ -296,6 +230,12 @@ type DragState =
       startY: number;
       origX: number;
       origY: number;
+      origPoints?: Array<{ x: number; y: number }>;
+    }
+  | {
+      kind: "vertex-region";
+      regionId: string;
+      vertexIndex: number;
     }
   | {
       kind: "resize-region";
@@ -316,10 +256,19 @@ type DragState =
       centerMapY: number;
       startAngle: number;
       origRotation: number;
+    }
+  | {
+      kind: "label";
+      labelId: string;
+      startX: number;
+      startY: number;
+      origLabelX: number;
+      origLabelY: number;
     };
 
 export function MapPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     book,
     hydrated,
@@ -327,11 +276,16 @@ export function MapPage() {
     removeMapPin,
     upsertMapRegion,
     removeMapRegion,
+    upsertMapLabel,
+    removeMapLabel,
+    upsertMapPath,
+    removeMapPath,
     autoPlaceMapPins,
     updateStoryMap,
     takeBookSnapshot,
     upsertLocations,
     replaceLocation,
+    promoteMapToSeriesBible,
   } = useBook();
   const claude = useClaudeStatus();
   const [layoutBusy, setLayoutBusy] = useState(false);
@@ -359,7 +313,19 @@ export function MapPage() {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
+  const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   const [drawKind, setDrawKind] = useState<StoryMapRegionKind | null>(null);
+  const [pathDrawKind, setPathDrawKind] = useState<StoryMapPathKind | null>(null);
+  const [pathDraftPoints, setPathDraftPoints] = useState<
+    Array<{ x: number; y: number }>
+  >([]);
+  const [labelTool, setLabelTool] = useState(false);
+  const [showLegend, setShowLegend] = useState(false);
+  const [dismissedEmptyWelcome, setDismissedEmptyWelcome] = useState(false);
+  const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
+  const [selectedChronicleId, setSelectedChronicleId] = useState<string | null>(
+    null,
+  );
   const [draftRegion, setDraftRegion] = useState<{
     x: number;
     y: number;
@@ -369,6 +335,30 @@ export function MapPage() {
   const dragRef = useRef<DragState | null>(null);
   /** Local mirror while dragging so we don't spam React on every move for regions. */
   const regionDragLive = useRef<StoryMapRegion | null>(null);
+  const focusAppliedRef = useRef<string | null>(null);
+
+  const focusId = searchParams.get("focus");
+
+  const chronicleMarkers = useMemo(() => {
+    return (book.chronicle ?? []).filter(
+      (e) => e.mapMarker?.mapId === map.id,
+    );
+  }, [book.chronicle, map.id]);
+
+  const legendItems = useMemo(() => {
+    const regionKinds = new Set<StoryMapRegionKind>();
+    for (const r of map.regions) {
+      regionKinds.add(r.kind ?? "territory");
+    }
+    const pathKinds = new Set<StoryMapPathKind>();
+    for (const p of map.paths ?? []) {
+      pathKinds.add(p.kind);
+    }
+    return {
+      regionKinds: [...regionKinds],
+      pathKinds: [...pathKinds],
+    };
+  }, [map.regions, map.paths]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -383,9 +373,17 @@ export function MapPage() {
   useEffect(() => {
     setSelectedPinId(null);
     setSelectedRegionId(null);
+    setSelectedLabelId(null);
+    setSelectedPathId(null);
+    setSelectedChronicleId(null);
     setDrawKind(null);
+    setPathDrawKind(null);
+    setPathDraftPoints([]);
+    setLabelTool(false);
     setDraftRegion(null);
+    setDismissedEmptyWelcome(false);
     setZoom(1);
+    focusAppliedRef.current = null;
     const el = viewportRef.current;
     if (!el) return;
     setPan({
@@ -394,6 +392,43 @@ export function MapPage() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book.activeMapId]);
+
+  useEffect(() => {
+    if (!hydrated || !focusId) return;
+    if (focusAppliedRef.current === focusId) return;
+    const pin = map.pins.find((p) => p.locationId === focusId);
+    if (!pin) return;
+    focusAppliedRef.current = focusId;
+    setSelectedPinId(focusId);
+    setSelectedRegionId(null);
+    setSelectedLabelId(null);
+    setSelectedPathId(null);
+    setSelectedChronicleId(null);
+    const el = viewportRef.current;
+    if (!el) return;
+    const cx = pin.x * map.width;
+    const cy = pin.y * map.height;
+    setPan({
+      x: el.clientWidth / 2 - cx * zoom,
+      y: el.clientHeight / 2 - cy * zoom,
+    });
+  }, [hydrated, focusId, map.pins, map.width, map.height, zoom]);
+
+  useEffect(() => {
+    if (!pathDrawKind && pathDraftPoints.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPathDraftPoints([]);
+        setPathDrawKind(null);
+      }
+      if (e.key === "Enter" && pathDraftPoints.length >= 2 && pathDrawKind) {
+        finishPath(pathDrawKind, pathDraftPoints);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathDrawKind, pathDraftPoints]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -460,14 +495,77 @@ export function MapPage() {
     };
   }
 
+  function finishPath(
+    kind: StoryMapPathKind,
+    points: Array<{ x: number; y: number }>,
+  ) {
+    if (points.length < 2) return;
+    const n =
+      (map.paths ?? []).filter((p) => p.kind === kind).length + 1;
+    const path = createMapPath({
+      kind,
+      points,
+      name: `${MAP_PATH_KIND_META[kind].label} ${n}`,
+    });
+    upsertMapPath(path);
+    setSelectedPathId(path.id);
+    setSelectedPinId(null);
+    setSelectedRegionId(null);
+    setSelectedLabelId(null);
+    setSelectedChronicleId(null);
+    setPathDraftPoints([]);
+    setPathDrawKind(null);
+  }
+
   function onViewportPointerDown(e: ReactPointerEvent) {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
     if (target.closest("[data-map-pin]")) return;
     if (target.closest("[data-map-region]")) return;
+    if (target.closest("[data-map-label]")) return;
+    if (target.closest("[data-map-path]")) return;
+    if (target.closest("[data-chronicle-marker]")) return;
+
+    if (pathDrawKind) {
+      const pos = clientToMap(e.clientX, e.clientY);
+      setPathDraftPoints((prev) => [...prev, pos]);
+      setSelectedPinId(null);
+      setSelectedRegionId(null);
+      setSelectedLabelId(null);
+      setSelectedPathId(null);
+      setSelectedChronicleId(null);
+      return;
+    }
+
+    if (labelTool) {
+      const pos = clientToMap(e.clientX, e.clientY);
+      const label = createMapLabel({ text: "Label", x: pos.x, y: pos.y });
+      upsertMapLabel(label);
+      setSelectedLabelId(label.id);
+      setSelectedPinId(null);
+      setSelectedRegionId(null);
+      return;
+    }
 
     if (drawKind) {
       const start = clientToMap(e.clientX, e.clientY);
+      if (isMapFeatureIcon(drawKind)) {
+        const meta = MAP_REGION_KIND_META[drawKind];
+        const n =
+          map.regions.filter((r) => (r.kind ?? "territory") === drawKind)
+            .length + 1;
+        const region = createMapRegion({
+          name: `${meta.defaultName} ${n}`,
+          kind: drawKind,
+          x: start.x,
+          y: start.y,
+        });
+        upsertMapRegion(region);
+        setSelectedRegionId(region.id);
+        setSelectedPinId(null);
+        setSelectedLabelId(null);
+        return;
+      }
       dragRef.current = {
         kind: "draw-region",
         startMapX: start.x,
@@ -476,6 +574,7 @@ export function MapPage() {
       setDraftRegion({ x: start.x, y: start.y, w: 0, h: 0 });
       setSelectedPinId(null);
       setSelectedRegionId(null);
+      setSelectedLabelId(null);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
@@ -490,6 +589,16 @@ export function MapPage() {
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     setSelectedPinId(null);
     setSelectedRegionId(null);
+    setSelectedLabelId(null);
+    setSelectedPathId(null);
+    setSelectedChronicleId(null);
+  }
+
+  function onViewportDoubleClick(e: ReactMouseEvent) {
+    if (pathDrawKind && pathDraftPoints.length >= 2) {
+      e.preventDefault();
+      finishPath(pathDrawKind, pathDraftPoints);
+    }
   }
 
   function onViewportPointerMove(e: ReactPointerEvent) {
@@ -517,6 +626,19 @@ export function MapPage() {
       return;
     }
 
+    if (drag.kind === "label") {
+      const deltaX = (e.clientX - drag.startX) / (zoom * map.width);
+      const deltaY = (e.clientY - drag.startY) / (zoom * map.height);
+      const label = map.labels.find((l) => l.id === drag.labelId);
+      if (!label) return;
+      upsertMapLabel({
+        ...label,
+        x: Math.min(1, Math.max(0, drag.origLabelX + deltaX)),
+        y: Math.min(1, Math.max(0, drag.origLabelY + deltaY)),
+      });
+      return;
+    }
+
     if (drag.kind === "draw-region") {
       const cur = clientToMap(e.clientX, e.clientY);
       const x = Math.min(drag.startMapX, cur.x);
@@ -534,11 +656,38 @@ export function MapPage() {
         regionDragLive.current ??
         map.regions.find((r) => r.id === drag.regionId);
       if (!region) return;
-      const next = {
-        ...region,
-        x: Math.min(1 - region.w, Math.max(0, drag.origX + deltaX)),
-        y: Math.min(1 - region.h, Math.max(0, drag.origY + deltaY)),
-      };
+      const next =
+        isPolygonRegion(region) || drag.origPoints
+          ? translatePolygonRegion(
+              {
+                ...region,
+                points: drag.origPoints ?? region.points,
+              },
+              deltaX,
+              deltaY,
+            )
+          : {
+              ...region,
+              x: Math.min(1 - region.w, Math.max(0, drag.origX + deltaX)),
+              y: Math.min(1 - region.h, Math.max(0, drag.origY + deltaY)),
+            };
+      regionDragLive.current = next;
+      upsertMapRegion(next);
+      return;
+    }
+
+    if (drag.kind === "vertex-region") {
+      const pos = clientToMap(e.clientX, e.clientY);
+      const region =
+        regionDragLive.current ??
+        map.regions.find((r) => r.id === drag.regionId);
+      if (!region) return;
+      const next = movePolygonVertex(
+        region,
+        drag.vertexIndex,
+        pos.x,
+        pos.y,
+      );
       regionDragLive.current = next;
       upsertMapRegion(next);
       return;
@@ -626,7 +775,7 @@ export function MapPage() {
 
   function startPinDrag(e: ReactPointerEvent, pin: StoryMapPin) {
     e.stopPropagation();
-    if (drawKind) return;
+    if (drawKind || labelTool) return;
     dragRef.current = {
       kind: "pin",
       pinId: pin.id,
@@ -637,12 +786,34 @@ export function MapPage() {
     };
     setSelectedPinId(pin.locationId);
     setSelectedRegionId(null);
+    setSelectedLabelId(null);
+    setSelectedPathId(null);
+    setSelectedChronicleId(null);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function startLabelDrag(e: ReactPointerEvent, label: StoryMapLabel) {
+    e.stopPropagation();
+    if (drawKind) return;
+    dragRef.current = {
+      kind: "label",
+      labelId: label.id,
+      startX: e.clientX,
+      startY: e.clientY,
+      origLabelX: label.x,
+      origLabelY: label.y,
+    };
+    setSelectedLabelId(label.id);
+    setSelectedPinId(null);
+    setSelectedRegionId(null);
+    setSelectedPathId(null);
+    setSelectedChronicleId(null);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
   function startRegionMove(e: ReactPointerEvent, region: StoryMapRegion) {
     e.stopPropagation();
-    if (drawKind) return;
+    if (drawKind || labelTool) return;
     dragRef.current = {
       kind: "move-region",
       regionId: region.id,
@@ -650,10 +821,37 @@ export function MapPage() {
       startY: e.clientY,
       origX: region.x,
       origY: region.y,
+      ...(isPolygonRegion(region) && region.points
+        ? { origPoints: region.points.map((p) => ({ ...p })) }
+        : {}),
     };
     regionDragLive.current = region;
     setSelectedRegionId(region.id);
     setSelectedPinId(null);
+    setSelectedLabelId(null);
+    setSelectedPathId(null);
+    setSelectedChronicleId(null);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function startVertexMove(
+    e: ReactPointerEvent,
+    region: StoryMapRegion,
+    index: number,
+  ) {
+    e.stopPropagation();
+    if (drawKind || labelTool) return;
+    dragRef.current = {
+      kind: "vertex-region",
+      regionId: region.id,
+      vertexIndex: index,
+    };
+    regionDragLive.current = region;
+    setSelectedRegionId(region.id);
+    setSelectedPinId(null);
+    setSelectedLabelId(null);
+    setSelectedPathId(null);
+    setSelectedChronicleId(null);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
@@ -678,6 +876,7 @@ export function MapPage() {
     regionDragLive.current = region;
     setSelectedRegionId(region.id);
     setSelectedPinId(null);
+    setSelectedLabelId(null);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
@@ -703,6 +902,7 @@ export function MapPage() {
     regionDragLive.current = region;
     setSelectedRegionId(region.id);
     setSelectedPinId(null);
+    setSelectedLabelId(null);
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
@@ -722,6 +922,9 @@ export function MapPage() {
     upsertMapPin(createMapPin(location.id, x, y, location.name.trim() || undefined));
     setSelectedPinId(location.id);
     setSelectedRegionId(null);
+    setSelectedLabelId(null);
+    setSelectedPathId(null);
+    setSelectedChronicleId(null);
   }
 
   async function buildMapFromStory() {
@@ -877,6 +1080,30 @@ export function MapPage() {
     updateStoryMap(clearMapBackground(map));
   }
 
+  async function onApplyStarter(starterId: string) {
+    setBasemapError(null);
+    setBasemapBusy(true);
+    try {
+      const next = await prepareMapStarter(map, starterId);
+      updateStoryMap(next);
+      setZoom(1);
+      requestAnimationFrame(() => {
+        const el = viewportRef.current;
+        if (!el) return;
+        setPan({
+          x: (el.clientWidth - next.width) / 2,
+          y: (el.clientHeight - next.height) / 2,
+        });
+      });
+    } catch (err) {
+      setBasemapError(
+        err instanceof Error ? err.message : "Could not open that map starter.",
+      );
+    } finally {
+      setBasemapBusy(false);
+    }
+  }
+
   const selectedPin = selectedPinId ? locById.get(selectedPinId) : null;
   const selectedMapPin = selectedPinId
     ? map.pins.find((p) => p.locationId === selectedPinId)
@@ -885,6 +1112,33 @@ export function MapPage() {
     selectedRegionId != null
       ? map.regions.find((r) => r.id === selectedRegionId) ?? null
       : null;
+  const selectedLabel =
+    selectedLabelId != null
+      ? map.labels.find((l) => l.id === selectedLabelId) ?? null
+      : null;
+  const selectedPath =
+    selectedPathId != null
+      ? (map.paths ?? []).find((p) => p.id === selectedPathId) ?? null
+      : null;
+  const selectedChronicle: ChronicleEvent | null =
+    selectedChronicleId != null
+      ? (book.chronicle ?? []).find((e) => e.id === selectedChronicleId) ?? null
+      : null;
+  const selectedIsIcon = selectedRegion
+    ? isMapFeatureIcon(selectedRegion.kind ?? "territory")
+    : false;
+  const selectedIsPolygon = selectedRegion
+    ? isPolygonRegion(selectedRegion)
+    : false;
+  const isEmptyBoard =
+    !mapHasBasemap(map) &&
+    map.pins.length === 0 &&
+    map.regions.length === 0 &&
+    map.labels.length === 0 &&
+    (map.paths ?? []).length === 0;
+  const placingTool = Boolean(drawKind || labelTool || pathDrawKind);
+  const hasLegendContent =
+    legendItems.regionKinds.length > 0 || legendItems.pathKinds.length > 0;
 
   return (
     <div className="flex h-screen flex-col lg:flex-row">
@@ -897,10 +1151,23 @@ export function MapPage() {
             Map
           </h1>
           <MapSwitcher />
+          <SeriesBibleStrip kind="maps" />
           <p className="mt-3 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
-            Upload a real map for contemporary or urban settings, or sketch fantasy
-            ranges and water — then pin places so geography sits against the story.
+            Territory paints a wash; Mountain, Water, and Building place icons;
+            Roads & paths trace routes. Upload a basemap or pin places onto the
+            corkboard.
           </p>
+          {book.seriesId ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-3 rounded-full text-xs"
+              onClick={() => promoteMapToSeriesBible(map.id)}
+            >
+              Promote to series
+            </Button>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-2 px-5 pb-3 lg:px-6">
@@ -917,7 +1184,7 @@ export function MapPage() {
           <Button
             type="button"
             size="sm"
-            variant={map.backgroundImage ? "subtle" : "outline"}
+            variant={mapHasBasemap(map) ? "subtle" : "outline"}
             disabled={basemapBusy || layoutBusy}
             onClick={() => basemapInputRef.current?.click()}
             title="Upload a real map (city streets, floor plan…)"
@@ -925,11 +1192,11 @@ export function MapPage() {
             <ImagePlus className="h-3.5 w-3.5" strokeWidth={1.5} />
             {basemapBusy
               ? "Uploading…"
-              : map.backgroundImage
+              : mapHasBasemap(map)
                 ? "Replace map"
                 : "Upload map"}
           </Button>
-          {map.backgroundImage ? (
+          {mapHasBasemap(map) ? (
             <Button
               type="button"
               size="sm"
@@ -967,8 +1234,11 @@ export function MapPage() {
                 ? Mountain
                 : kind === "water"
                   ? Waves
-                  : Square;
+                  : kind === "building"
+                    ? Building2
+                    : Square;
             const active = drawKind === kind;
+            const iconPlacement = isMapFeatureIcon(kind);
             return (
               <Button
                 key={kind}
@@ -978,13 +1248,74 @@ export function MapPage() {
                 disabled={layoutBusy}
                 onClick={() => {
                   setDrawKind((v) => (v === kind ? null : kind));
+                  setPathDrawKind(null);
+                  setPathDraftPoints([]);
+                  setLabelTool(false);
                   setDraftRegion(null);
                   setSelectedPinId(null);
+                  setSelectedLabelId(null);
                 }}
-                title={`Drag on the board to paint ${meta.label.toLowerCase()}`}
+                title={
+                  iconPlacement
+                    ? `Click the board to place a ${meta.label.toLowerCase()} icon`
+                    : `Drag on the board to paint a ${meta.label.toLowerCase()} wash`
+                }
               >
                 <Icon className="h-3.5 w-3.5" strokeWidth={1.5} />
-                {active ? "Drawing…" : meta.label}
+                {active
+                  ? iconPlacement
+                    ? "Placing…"
+                    : "Drawing…"
+                  : meta.label}
+              </Button>
+            );
+          })}
+          <Button
+            type="button"
+            size="sm"
+            variant={labelTool ? "default" : "outline"}
+            disabled={layoutBusy}
+            onClick={() => {
+              setLabelTool((v) => !v);
+              setDrawKind(null);
+              setPathDrawKind(null);
+              setPathDraftPoints([]);
+              setDraftRegion(null);
+              setSelectedPinId(null);
+              setSelectedRegionId(null);
+            }}
+            title="Click the board to place a text label"
+          >
+            <Type className="h-3.5 w-3.5" strokeWidth={1.5} />
+            {labelTool ? "Labeling…" : "Label"}
+          </Button>
+          {PATH_KINDS.map((kind) => {
+            const meta = MAP_PATH_KIND_META[kind];
+            const Icon =
+              kind === "road" ? Route : kind === "river" ? Waves : Route;
+            const active = pathDrawKind === kind;
+            return (
+              <Button
+                key={kind}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "outline"}
+                disabled={layoutBusy}
+                onClick={() => {
+                  setPathDrawKind((v) => (v === kind ? null : kind));
+                  setPathDraftPoints([]);
+                  setDrawKind(null);
+                  setLabelTool(false);
+                  setDraftRegion(null);
+                  setSelectedPinId(null);
+                  setSelectedRegionId(null);
+                  setSelectedLabelId(null);
+                  setSelectedPathId(null);
+                }}
+                title={`Click to add points · double-click or Enter to finish a ${meta.label.toLowerCase()}`}
+              >
+                <Icon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                {active ? "Tracing…" : meta.label}
               </Button>
             );
           })}
@@ -1018,13 +1349,25 @@ export function MapPage() {
 
         {drawKind ? (
           <p className="px-5 pb-2 font-[family-name:var(--font-ui)] text-xs text-[var(--accent)] lg:px-6">
-            Drag across the board to paint{" "}
-            {MAP_REGION_KIND_META[drawKind].label.toLowerCase()}.
+            {isMapFeatureIcon(drawKind)
+              ? `Click the board to place a ${MAP_REGION_KIND_META[drawKind].label.toLowerCase()} icon.`
+              : `Drag across the board to paint a ${MAP_REGION_KIND_META[drawKind].label.toLowerCase()} wash.`}
+          </p>
+        ) : pathDrawKind ? (
+          <p className="px-5 pb-2 font-[family-name:var(--font-ui)] text-xs text-[var(--accent)] lg:px-6">
+            Click to add points · double-click or Enter to finish · Escape to
+            cancel.
+          </p>
+        ) : labelTool ? (
+          <p className="px-5 pb-2 font-[family-name:var(--font-ui)] text-xs text-[var(--accent)] lg:px-6">
+            Click the board to place a label.
           </p>
         ) : null}
-        {map.backgroundImage ? (
+        {mapHasBasemap(map) ? (
           <p className="px-5 pb-2 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)] lg:px-6">
-            Basemap · {map.backgroundName || "Uploaded"} — pin places on top.
+            {map.backgroundVector === "city"
+              ? "OpenStreetMap city — real streets & buildings; pin places on top."
+              : `Basemap · ${map.backgroundName || "Uploaded"} — pin places on top.`}
           </p>
         ) : null}
         {basemapError ? (
@@ -1049,19 +1392,26 @@ export function MapPage() {
           </p>
           {map.regions.length === 0 ? (
             <p className="mb-5 px-2 font-[family-name:var(--font-ui)] text-sm italic text-[var(--ink-faint)]">
-              None yet — paint Territory, Mountains, or Water on the board.
+              None yet — paint a Territory wash, or click to place Mountain /
+              Water / Building icons.
             </p>
           ) : (
             <ul className="mb-5 space-y-1">
               {map.regions.map((r) => {
                 const kind = r.kind ?? "territory";
                 const style = territoryStyle(r.color, kind);
+                const marker =
+                  kind === "building"
+                    ? featureMarkerStyle(r.color, kind)
+                    : null;
                 const KindIcon =
                   kind === "mountains"
                     ? Mountain
                     : kind === "water"
                       ? Waves
-                      : Square;
+                      : kind === "building"
+                        ? Building2
+                        : Square;
                 return (
                   <li key={r.id}>
                     <button
@@ -1069,6 +1419,7 @@ export function MapPage() {
                       onClick={() => {
                         setSelectedRegionId(r.id);
                         setSelectedPinId(null);
+                        setSelectedLabelId(null);
                       }}
                       className={cn(
                         "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors",
@@ -1080,21 +1431,73 @@ export function MapPage() {
                       <span
                         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border"
                         style={{
-                          background: style.fill,
-                          borderColor: style.stroke,
+                          background: marker?.fill ?? style.fill,
+                          borderColor: marker?.border ?? style.stroke,
+                          color: marker?.ink,
                         }}
                       >
                         <KindIcon
-                          className="h-3 w-3 text-[rgba(45,42,38,0.45)]"
+                          className={cn(
+                            "h-3 w-3",
+                            !marker && "text-[rgba(45,42,38,0.45)]",
+                          )}
                           strokeWidth={1.5}
                         />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
-                          {r.name}
+                          {r.name.trim() || "Unnamed"}
                         </span>
                         <span className="block font-[family-name:var(--font-ui)] text-[0.65rem] text-[var(--ink-faint)]">
                           {MAP_REGION_KIND_META[kind].label}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <p className="mb-2 mt-6 px-2 font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
+            Routes · {(map.paths ?? []).length}
+          </p>
+          {(map.paths ?? []).length === 0 ? (
+            <p className="mb-5 px-2 font-[family-name:var(--font-ui)] text-sm italic text-[var(--ink-faint)]">
+              None yet — trace a road, path, or river on the board.
+            </p>
+          ) : (
+            <ul className="mb-5 space-y-1">
+              {(map.paths ?? []).map((p) => {
+                const meta = MAP_PATH_KIND_META[p.kind];
+                return (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPathId(p.id);
+                        setSelectedPinId(null);
+                        setSelectedRegionId(null);
+                        setSelectedLabelId(null);
+                        setSelectedChronicleId(null);
+                      }}
+                      className={cn(
+                        "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors",
+                        selectedPathId === p.id
+                          ? "bg-[var(--accent-soft)]"
+                          : "hover:bg-[rgba(45,42,38,0.05)]",
+                      )}
+                    >
+                      <span
+                        className="h-0.5 w-5 shrink-0 rounded-full"
+                        style={{ background: meta.stroke }}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                          {p.name.trim() || "Unnamed"}
+                        </span>
+                        <span className="block font-[family-name:var(--font-ui)] text-[0.65rem] text-[var(--ink-faint)]">
+                          {meta.label}
                         </span>
                       </span>
                     </button>
@@ -1170,6 +1573,7 @@ export function MapPage() {
                         onClick={() => {
                           setSelectedPinId(loc.id);
                           setSelectedRegionId(null);
+                          setSelectedLabelId(null);
                         }}
                         className={cn(
                           "flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors",
@@ -1200,7 +1604,7 @@ export function MapPage() {
           ref={viewportRef}
           className={cn(
             "absolute inset-0 touch-none overflow-hidden",
-            drawKind
+            placingTool
               ? "cursor-crosshair"
               : "cursor-grab active:cursor-grabbing",
           )}
@@ -1208,6 +1612,7 @@ export function MapPage() {
           onPointerMove={onViewportPointerMove}
           onPointerUp={onViewportPointerUp}
           onPointerCancel={onViewportPointerUp}
+          onDoubleClick={onViewportDoubleClick}
           onDragOver={(e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = "copy";
@@ -1240,31 +1645,107 @@ export function MapPage() {
             <div
               className="absolute inset-0 overflow-hidden rounded-[2px] shadow-[0_20px_60px_rgba(45,42,38,0.12)]"
               style={{
-                background: map.backgroundImage
-                  ? "#1c1a17"
-                  : "repeating-linear-gradient(0deg, transparent, transparent 23px, rgba(45,42,38,0.03) 24px), repeating-linear-gradient(90deg, transparent, transparent 23px, rgba(45,42,38,0.03) 24px), #F3EEE4",
+                background: mapHasBasemap(map)
+                  ? MAP_LINE_ART_PAPER
+                  : "#F3EEE4",
                 border: "1px solid rgba(45,42,38,0.08)",
               }}
             >
-              {map.backgroundImage ? (
+              {map.backgroundVector === "city" ? (
+                <CityVectorBasemap />
+              ) : map.backgroundImage ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={map.backgroundImage}
                   alt={map.backgroundName || "Story basemap"}
                   draggable={false}
-                  className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover"
+                  className="pointer-events-none absolute inset-0 h-full w-full select-none object-contain"
                 />
               ) : null}
             </div>
 
-            {/* Soft feature washes — territory / mountains / water */}
+            {/* Soft feature washes & point icons */}
             {map.regions.map((r) => {
               const kind = r.kind ?? "territory";
+              const isIcon = isMapFeatureIcon(kind);
+              const isPoly = isPolygonRegion(r);
               const shape = r.shape ?? "rect";
               const rotation = r.rotation ?? 0;
               const outline = regionOutlineStyle(shape);
               const style = territoryStyle(r.color, kind);
+              const edgeStyle = territoryStrokeStyle(r.stroke, style.stroke);
               const active = selectedRegionId === r.id;
+
+              if (isPoly && r.points) {
+                const polyPoints = r.points
+                  .map((p) => `${p.x * map.width},${p.y * map.height}`)
+                  .join(" ");
+                return (
+                  <div
+                    key={r.id}
+                    data-map-region
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedRegionId(r.id);
+                      setSelectedPinId(null);
+                      setSelectedLabelId(null);
+                    }}
+                    className={cn(
+                      "absolute inset-0 transition-[filter] duration-200",
+                      active ? "z-[5]" : "z-[1]",
+                      placingTool && "pointer-events-none",
+                    )}
+                  >
+                    <svg
+                      className="absolute inset-0 h-full w-full"
+                      viewBox={`0 0 ${map.width} ${map.height}`}
+                      preserveAspectRatio="none"
+                    >
+                      <polygon
+                        points={polyPoints}
+                        fill={polygonWashFill(style.fill)}
+                        stroke="rgba(45,42,38,0.82)"
+                        strokeWidth={active ? 3 : 2.25}
+                        strokeLinejoin="round"
+                        className={cn(
+                          !placingTool &&
+                            "cursor-grab active:cursor-grabbing",
+                        )}
+                        onPointerDown={(e) => startRegionMove(e, r)}
+                      />
+                    </svg>
+                    {r.name.trim() ? (
+                      <span
+                        className="pointer-events-none absolute z-[1] max-w-[40%] truncate font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-muted)]"
+                        style={{
+                          left: `${r.x * 100}%`,
+                          top: `${r.y * 100}%`,
+                        }}
+                      >
+                        {r.name}
+                      </span>
+                    ) : null}
+                    {active && !placingTool
+                      ? r.points.map((p, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            aria-label={`Reshape point ${i + 1}`}
+                            title="Drag to reshape"
+                            data-map-region
+                            onPointerDown={(e) => startVertexMove(e, r, i)}
+                            className="absolute z-[2] h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-[1px] border border-[rgba(45,42,38,0.3)] bg-[rgba(247,243,234,0.95)] shadow-sm active:cursor-grabbing"
+                            style={{
+                              left: `${p.x * 100}%`,
+                              top: `${p.y * 100}%`,
+                            }}
+                          />
+                        ))
+                      : null}
+                  </div>
+                );
+              }
+
               return (
                 <div
                   key={r.id}
@@ -1274,11 +1755,12 @@ export function MapPage() {
                     e.stopPropagation();
                     setSelectedRegionId(r.id);
                     setSelectedPinId(null);
+                    setSelectedLabelId(null);
                   }}
                   className={cn(
                     "absolute transition-[box-shadow] duration-200",
                     active ? "z-[5]" : "z-[1]",
-                    drawKind
+                    placingTool
                       ? "pointer-events-none"
                       : "cursor-grab active:cursor-grabbing",
                   )}
@@ -1287,32 +1769,42 @@ export function MapPage() {
                     top: `${r.y * 100}%`,
                     width: `${r.w * 100}%`,
                     height: `${r.h * 100}%`,
-                    transform: `rotate(${rotation}deg)`,
+                    transform: isIcon ? undefined : `rotate(${rotation}deg)`,
                     transformOrigin: "center center",
                   }}
                 >
-                  <div
-                    className="absolute inset-0 overflow-hidden"
-                    style={{
-                      background: style.fill,
-                      border: `1.5px solid ${style.stroke}`,
-                      borderRadius: outline.borderRadius,
-                      boxShadow: active
-                        ? "0 0 0 2px rgba(45,42,38,0.18), inset 0 0 0 1px rgba(255,255,255,0.25)"
-                        : undefined,
-                    }}
-                  >
-                    <RegionFeatureGlyphs
-                      kind={kind}
-                      regionId={r.id}
-                      w={r.w}
-                      h={r.h}
-                    />
-                    <span className="pointer-events-none absolute left-3 top-2.5 z-[1] max-w-[80%] truncate font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-muted)]">
-                      {r.name}
-                    </span>
-                  </div>
-                  {active && !drawKind ? (
+                  {isIcon ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <MapFeatureIcon
+                        kind={kind as Exclude<StoryMapRegionKind, "territory">}
+                        active={active}
+                        name={r.name}
+                        color={r.color}
+                      />
+                    </div>
+                  ) : (
+                    <div
+                      className="absolute inset-0 overflow-hidden"
+                      style={{
+                        background: style.fill,
+                        borderRadius:
+                          shape === "soft" ? undefined : outline.borderRadius,
+                        clipPath:
+                          shape === "soft"
+                            ? organicClipPath(r.id)
+                            : undefined,
+                        border: edgeStyle?.border ?? "none",
+                        boxShadow: active
+                          ? "0 0 0 2px rgba(45,42,38,0.14), 0 8px 20px rgba(45,42,38,0.08)"
+                          : edgeStyle?.boxShadow,
+                      }}
+                    >
+                      <span className="pointer-events-none absolute left-3 top-2.5 z-[1] max-w-[80%] truncate font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-muted)]">
+                        {r.name.trim() ? r.name : null}
+                      </span>
+                    </div>
+                  )}
+                  {active && !placingTool && !isIcon ? (
                     <>
                       <button
                         type="button"
@@ -1354,7 +1846,11 @@ export function MapPage() {
               );
             })}
 
-            {draftRegion && draftRegion.w > 0.01 && draftRegion.h > 0.01 && drawKind ? (
+            {draftRegion &&
+            draftRegion.w > 0.01 &&
+            draftRegion.h > 0.01 &&
+            drawKind &&
+            !isMapFeatureIcon(drawKind) ? (
               <div
                 className="pointer-events-none absolute z-[2] rounded-[1.75rem] border border-dashed"
                 style={{
@@ -1367,6 +1863,76 @@ export function MapPage() {
                 }}
               />
             ) : null}
+
+            <svg
+              className="absolute inset-0 z-[2]"
+              width={map.width}
+              height={map.height}
+            >
+              {(map.paths ?? []).map((path) => {
+                const meta = MAP_PATH_KIND_META[path.kind];
+                const pts = path.points
+                  .map((p) => `${p.x * map.width},${p.y * map.height}`)
+                  .join(" ");
+                const active = selectedPathId === path.id;
+                return (
+                  <polyline
+                    key={path.id}
+                    data-map-path
+                    points={pts}
+                    fill="none"
+                    stroke={meta.stroke}
+                    strokeWidth={active ? meta.width + 1.5 : meta.width}
+                    strokeDasharray={meta.dash}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={cn(
+                      placingTool && !pathDrawKind
+                        ? "pointer-events-none"
+                        : "cursor-pointer",
+                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPathId(path.id);
+                      setSelectedPinId(null);
+                      setSelectedRegionId(null);
+                      setSelectedLabelId(null);
+                      setSelectedChronicleId(null);
+                    }}
+                  />
+                );
+              })}
+              {pathDraftPoints.length > 0 && pathDrawKind ? (
+                <>
+                  <polyline
+                    points={pathDraftPoints
+                      .map(
+                        (p) =>
+                          `${p.x * map.width},${p.y * map.height}`,
+                      )
+                      .join(" ")}
+                    fill="none"
+                    stroke={MAP_PATH_KIND_META[pathDrawKind].stroke}
+                    strokeWidth={MAP_PATH_KIND_META[pathDrawKind].width}
+                    strokeDasharray={MAP_PATH_KIND_META[pathDrawKind].dash}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    opacity={0.75}
+                  />
+                  {pathDraftPoints.map((p, i) => (
+                    <circle
+                      key={i}
+                      cx={p.x * map.width}
+                      cy={p.y * map.height}
+                      r={4}
+                      fill="rgba(247,243,234,0.95)"
+                      stroke={MAP_PATH_KIND_META[pathDrawKind].stroke}
+                      strokeWidth={1.5}
+                    />
+                  ))}
+                </>
+              ) : null}
+            </svg>
 
             <svg
               className="pointer-events-none absolute inset-0 z-[3]"
@@ -1387,23 +1953,41 @@ export function MapPage() {
               ))}
             </svg>
 
-            {map.labels.map((label) => (
-              <div
-                key={label.id}
-                className="pointer-events-none absolute z-[4] -translate-x-1/2 -translate-y-1/2 font-[family-name:var(--font-display)] text-sm tracking-wide text-[var(--ink-faint)]"
-                style={{
-                  left: `${label.x * 100}%`,
-                  top: `${label.y * 100}%`,
-                }}
-              >
-                {label.text}
-              </div>
-            ))}
+            {map.labels.map((label) => {
+              const active = selectedLabelId === label.id;
+              return (
+                <button
+                  key={label.id}
+                  type="button"
+                  data-map-label
+                  onPointerDown={(e) => startLabelDrag(e, label)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedLabelId(label.id);
+                    setSelectedPinId(null);
+                    setSelectedRegionId(null);
+                  }}
+                  className={cn(
+                    "absolute z-[4] -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-md px-1.5 py-0.5 font-[family-name:var(--font-display)] text-sm tracking-wide text-[var(--ink-muted)] active:cursor-grabbing",
+                    active &&
+                      "bg-[rgba(247,243,234,0.9)] text-[var(--ink)] shadow-[0_4px_14px_rgba(45,42,38,0.1)] ring-1 ring-[rgba(45,42,38,0.12)]",
+                    placingTool && !labelTool && "pointer-events-none",
+                  )}
+                  style={{
+                    left: `${label.x * 100}%`,
+                    top: `${label.y * 100}%`,
+                  }}
+                >
+                  {label.text}
+                </button>
+              );
+            })}
 
             {map.pins.map((pin) => {
               const loc = locById.get(pin.locationId);
               if (!loc) return null;
               const active = selectedPinId === loc.id;
+              const focused = focusId === loc.id;
               const color = povColor(loc.name);
               return (
                 <motion.button
@@ -1421,17 +2005,26 @@ export function MapPage() {
                     e.stopPropagation();
                     setSelectedPinId(loc.id);
                     setSelectedRegionId(null);
+                    setSelectedLabelId(null);
+                    setSelectedPathId(null);
+                    setSelectedChronicleId(null);
                   }}
                   className={cn(
                     "absolute z-10 flex -translate-x-1/2 -translate-y-full cursor-grab flex-col items-center active:cursor-grabbing",
                     active && "z-20",
-                    drawKind && "pointer-events-none",
+                    placingTool && "pointer-events-none",
                   )}
                   style={{
                     left: `${pin.x * 100}%`,
                     top: `${pin.y * 100}%`,
                   }}
                 >
+                  {focused ? (
+                    <span
+                      aria-hidden
+                      className="absolute bottom-0 left-1/2 h-8 w-8 -translate-x-1/2 translate-y-1/4 animate-pulse rounded-full border-2 border-[var(--accent)] opacity-60"
+                    />
+                  ) : null}
                   <span
                     className={cn(
                       "mb-1 max-w-[9rem] truncate rounded-full px-2.5 py-1 font-[family-name:var(--font-ui)] text-xs shadow-[0_4px_14px_rgba(45,42,38,0.1)]",
@@ -1453,21 +2046,169 @@ export function MapPage() {
               );
             })}
 
-            {map.pins.length === 0 && map.regions.length === 0 ? (
+            {chronicleMarkers.map((event) => {
+              const marker = event.mapMarker;
+              if (!marker) return null;
+              const active = selectedChronicleId === event.id;
+              return (
+                <button
+                  key={event.id}
+                  type="button"
+                  data-chronicle-marker
+                  title={event.title}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedChronicleId(event.id);
+                    setSelectedPinId(null);
+                    setSelectedRegionId(null);
+                    setSelectedLabelId(null);
+                    setSelectedPathId(null);
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    router.push("/chronicle");
+                  }}
+                  className={cn(
+                    "absolute z-[6] flex -translate-x-1/2 -translate-y-1/2 flex-col items-center",
+                    active && "z-[7]",
+                    placingTool && "pointer-events-none",
+                  )}
+                  style={{
+                    left: `${marker.x * 100}%`,
+                    top: `${marker.y * 100}%`,
+                  }}
+                >
+                  {active ? (
+                    <span className="mb-1 max-w-[8rem] truncate rounded-md bg-[rgba(247,243,234,0.92)] px-2 py-0.5 font-[family-name:var(--font-ui)] text-[0.65rem] text-[var(--ink-muted)] shadow-sm ring-1 ring-[rgba(45,42,38,0.1)]">
+                      {event.title}
+                    </span>
+                  ) : null}
+                  <span
+                    className={cn(
+                      "flex h-3 w-3 items-center justify-center rounded-full border",
+                      active
+                        ? "border-[var(--accent)] bg-[rgba(176,141,87,0.35)]"
+                        : "border-[rgba(45,42,38,0.2)] bg-[rgba(247,243,234,0.85)]",
+                    )}
+                  >
+                    <Clock
+                      className="h-2 w-2 text-[var(--ink-faint)]"
+                      strokeWidth={2}
+                    />
+                  </span>
+                </button>
+              );
+            })}
+
+            {map.pins.length === 0 &&
+            map.regions.length === 0 &&
+            map.labels.length === 0 &&
+            mapHasBasemap(map) ? (
               <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <p className="max-w-xs text-center font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-faint)]">
                   {locations.length === 0
                     ? "Add places in Locations, then pin them here."
-                    : map.backgroundImage
-                      ? "Pin places onto your uploaded map from the rail."
-                      : "Upload a real map, or paint territory, mountains, or water."}
+                    : "Pin places from the rail, paint a Territory wash, or place Mountain / Water / Building icons."}
                 </p>
               </div>
             ) : null}
           </div>
         </div>
 
+        {isEmptyBoard && !dismissedEmptyWelcome ? (
+          <div
+            className="absolute inset-0 z-30 flex items-center justify-center p-6"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div className="max-h-[min(90vh,40rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-[rgba(45,42,38,0.1)] bg-[rgba(247,243,234,0.96)] p-5 shadow-[0_16px_40px_rgba(45,42,38,0.12)] backdrop-blur-xl">
+              <p className="font-[family-name:var(--font-display)] text-xl font-medium tracking-wide text-[var(--ink)]">
+                Choose a board
+              </p>
+              <p className="mt-2 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
+                City builds a minimal street board you can zoom cleanly. New
+                world drops a hard outline to reshape. Or stay blank and build
+                your own.
+              </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {MAP_STARTERS.filter((s) => s.id !== "blank").map((starter) => (
+                  <button
+                    key={starter.id}
+                    type="button"
+                    disabled={basemapBusy || layoutBusy}
+                    onClick={() => void onApplyStarter(starter.id)}
+                    className="rounded-2xl border border-[rgba(45,42,38,0.1)] bg-[rgba(252,249,243,0.85)] px-4 py-3 text-left transition-colors hover:border-[color-mix(in_srgb,var(--accent)_40%,rgba(45,42,38,0.1))] disabled:opacity-50"
+                  >
+                    <span className="block font-[family-name:var(--font-display)] text-lg text-[var(--ink)]">
+                      {starter.label}
+                    </span>
+                    <span className="mt-1 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                      {starter.hint}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-[rgba(45,42,38,0.08)] pt-4">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={basemapBusy || layoutBusy}
+                  onClick={() => setDismissedEmptyWelcome(true)}
+                >
+                  Start blank
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={basemapBusy || layoutBusy}
+                  onClick={() => basemapInputRef.current?.click()}
+                >
+                  <ImagePlus className="h-3.5 w-3.5" strokeWidth={1.5} />
+                  Upload map
+                </Button>
+                {unplaced.length > 0 ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={layoutBusy}
+                    onClick={() => autoPlaceMapPins()}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} />
+                    Place all
+                  </Button>
+                ) : null}
+                <ClaudeDeepenButton
+                  configured={claude?.configured ?? null}
+                  busy={layoutBusy}
+                  label="Build from story"
+                  title="Read the manuscript and lay out geography"
+                  onClick={() => void buildMapFromStory()}
+                  className="rounded-full"
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div className="folio-chrome absolute bottom-5 right-5 flex items-center gap-1 rounded-full border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.9)] p-1 shadow-[0_8px_24px_rgba(45,42,38,0.08)] backdrop-blur-xl">
+          {hasLegendContent ? (
+            <button
+              type="button"
+              aria-label="Toggle legend"
+              title="Toggle legend"
+              onClick={() => setShowLegend((v) => !v)}
+              className={cn(
+                "rounded-full p-2 transition-colors",
+                showLegend
+                  ? "text-[var(--ink)]"
+                  : "text-[var(--ink-muted)] hover:text-[var(--ink)]",
+              )}
+            >
+              <List className="h-3.5 w-3.5" strokeWidth={1.5} />
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label="Zoom out"
@@ -1506,6 +2247,57 @@ export function MapPage() {
             <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} />
           </button>
         </div>
+
+        {showLegend && hasLegendContent ? (
+          <div className="folio-chrome pointer-events-auto absolute right-5 top-5 max-w-[11rem] rounded-xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.88)] px-3 py-2.5 shadow-[0_8px_24px_rgba(45,42,38,0.08)] backdrop-blur-xl">
+            <p className="font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
+              Legend
+            </p>
+            {legendItems.regionKinds.length > 0 ? (
+              <ul className="mt-2 space-y-1">
+                {legendItems.regionKinds.map((kind) => {
+                  const meta = MAP_REGION_KIND_META[kind];
+                  return (
+                    <li
+                      key={kind}
+                      className="flex items-center gap-2 font-[family-name:var(--font-ui)] text-[0.65rem] text-[var(--ink-muted)]"
+                    >
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                        style={{ background: meta.fill }}
+                      />
+                      {meta.label}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            {legendItems.pathKinds.length > 0 ? (
+              <ul
+                className={cn(
+                  "space-y-1",
+                  legendItems.regionKinds.length > 0 ? "mt-2" : "mt-2",
+                )}
+              >
+                {legendItems.pathKinds.map((kind) => {
+                  const meta = MAP_PATH_KIND_META[kind];
+                  return (
+                    <li
+                      key={kind}
+                      className="flex items-center gap-2 font-[family-name:var(--font-ui)] text-[0.65rem] text-[var(--ink-muted)]"
+                    >
+                      <span
+                        className="h-0.5 w-4 shrink-0 rounded-full"
+                        style={{ background: meta.stroke }}
+                      />
+                      {meta.label}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
 
         {selectedRegion ? (
           <motion.div
@@ -1552,21 +2344,67 @@ export function MapPage() {
                     ? Mountain
                     : kind === "water"
                       ? Waves
-                      : Square;
+                      : kind === "building"
+                        ? Building2
+                        : Square;
                 const active = (selectedRegion.kind ?? "territory") === kind;
                 return (
                   <button
                     key={kind}
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      const fromIcon = isMapFeatureIcon(
+                        selectedRegion.kind ?? "territory",
+                      );
+                      const toIcon = isMapFeatureIcon(kind);
+                      const cx =
+                        selectedRegion.x + selectedRegion.w / 2;
+                      const cy =
+                        selectedRegion.y + selectedRegion.h / 2;
+                      if (toIcon) {
+                        upsertMapRegion(
+                          createMapRegion({
+                            id: selectedRegion.id,
+                            name: selectedRegion.name,
+                            kind,
+                            x: cx,
+                            y: cy,
+                            color:
+                              selectedRegion.color ||
+                              MAP_REGION_KIND_META[kind].defaultColor,
+                            source: selectedRegion.source,
+                          }),
+                        );
+                        return;
+                      }
+                      if (fromIcon) {
+                        const w = 0.28;
+                        const h = 0.22;
+                        upsertMapRegion(
+                          createMapRegion({
+                            id: selectedRegion.id,
+                            name: selectedRegion.name,
+                            kind,
+                            x: Math.max(0, Math.min(1 - w, cx - w / 2)),
+                            y: Math.max(0, Math.min(1 - h, cy - h / 2)),
+                            w,
+                            h,
+                            color:
+                              selectedRegion.color ||
+                              MAP_REGION_KIND_META[kind].defaultColor,
+                            source: selectedRegion.source,
+                          }),
+                        );
+                        return;
+                      }
                       upsertMapRegion({
                         ...selectedRegion,
                         kind,
                         color:
                           selectedRegion.color ||
                           MAP_REGION_KIND_META[kind].defaultColor,
-                      })
-                    }
+                      });
+                    }}
                     className={cn(
                       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-[family-name:var(--font-ui)] text-xs transition-colors",
                       active
@@ -1580,94 +2418,160 @@ export function MapPage() {
                 );
               })}
             </div>
+            {!selectedIsIcon ? (
+              <>
+                <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
+                  Shape
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {REGION_SHAPES.map((shape) => {
+                    const meta = MAP_REGION_SHAPE_META[shape];
+                    const Icon =
+                      shape === "ellipse"
+                        ? Circle
+                        : shape === "soft"
+                          ? Waves
+                          : shape === "polygon"
+                            ? Pentagon
+                            : Square;
+                    const active = (selectedRegion.shape ?? "rect") === shape;
+                    return (
+                      <button
+                        key={shape}
+                        type="button"
+                        title={meta.hint}
+                        onClick={() => {
+                          if (shape === "polygon") {
+                            const { x, y, w, h } = selectedRegion;
+                            upsertMapRegion({
+                              ...selectedRegion,
+                              shape: "polygon",
+                              stroke: "ink",
+                              rotation: 0,
+                              points: [
+                                { x, y },
+                                { x: x + w, y },
+                                { x: x + w, y: y + h },
+                                { x, y: y + h },
+                              ],
+                            });
+                            return;
+                          }
+                          if (isPolygonRegion(selectedRegion)) {
+                            const { points: _points, ...rest } = selectedRegion;
+                            upsertMapRegion({ ...rest, shape, points: undefined });
+                            return;
+                          }
+                          upsertMapRegion({ ...selectedRegion, shape });
+                        }}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-[family-name:var(--font-ui)] text-xs transition-colors",
+                          active
+                            ? "bg-[var(--ink)] text-[var(--paper)]"
+                            : "bg-[rgba(45,42,38,0.06)] text-[var(--ink-muted)] hover:text-[var(--ink)]",
+                        )}
+                      >
+                        <Icon className="h-3 w-3" strokeWidth={1.5} />
+                        {meta.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
+                  Edge
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {REGION_STROKES.map((stroke) => {
+                    const meta = MAP_REGION_STROKE_META[stroke];
+                    const active = (selectedRegion.stroke ?? "none") === stroke;
+                    return (
+                      <button
+                        key={stroke}
+                        type="button"
+                        title={meta.hint}
+                        onClick={() =>
+                          upsertMapRegion({ ...selectedRegion, stroke })
+                        }
+                        className={cn(
+                          "rounded-full px-2.5 py-1 font-[family-name:var(--font-ui)] text-xs transition-colors",
+                          active
+                            ? "bg-[var(--ink)] text-[var(--paper)]"
+                            : "bg-[rgba(45,42,38,0.06)] text-[var(--ink-muted)] hover:text-[var(--ink)]",
+                        )}
+                      >
+                        {meta.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!selectedIsPolygon ? (
+                  <>
+                    <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
+                      Rotation
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        aria-label="Rotate left"
+                        onClick={() =>
+                          upsertMapRegion({
+                            ...selectedRegion,
+                            rotation: normalizeDeg(
+                              (selectedRegion.rotation ?? 0) - 15,
+                            ),
+                          })
+                        }
+                        className="rounded-full border border-[rgba(45,42,38,0.12)] p-1.5 text-[var(--ink-muted)] hover:text-[var(--ink)]"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      </button>
+                      <input
+                        type="range"
+                        min={0}
+                        max={360}
+                        step={1}
+                        value={Math.round(selectedRegion.rotation ?? 0)}
+                        onChange={(e) =>
+                          upsertMapRegion({
+                            ...selectedRegion,
+                            rotation: normalizeDeg(Number(e.target.value)),
+                          })
+                        }
+                        className="h-1.5 flex-1 cursor-pointer accent-[var(--ink)]"
+                      />
+                      <button
+                        type="button"
+                        aria-label="Rotate right"
+                        onClick={() =>
+                          upsertMapRegion({
+                            ...selectedRegion,
+                            rotation: normalizeDeg(
+                              (selectedRegion.rotation ?? 0) + 15,
+                            ),
+                          })
+                        }
+                        className="rounded-full border border-[rgba(45,42,38,0.12)] p-1.5 text-[var(--ink-muted)] hover:text-[var(--ink)]"
+                      >
+                        <RotateCw className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      </button>
+                      <span className="min-w-[2.75rem] text-right font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+                        {Math.round(selectedRegion.rotation ?? 0)}°
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="mt-3 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                    Drag the outline points to reshape · drag the fill to move
+                  </p>
+                )}
+              </>
+            ) : null}
             <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
-              Shape
-            </p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {REGION_SHAPES.map((shape) => {
-                const meta = MAP_REGION_SHAPE_META[shape];
-                const Icon =
-                  shape === "ellipse"
-                    ? Circle
-                    : shape === "soft"
-                      ? Waves
-                      : Square;
-                const active = (selectedRegion.shape ?? "rect") === shape;
-                return (
-                  <button
-                    key={shape}
-                    type="button"
-                    title={meta.hint}
-                    onClick={() =>
-                      upsertMapRegion({ ...selectedRegion, shape })
-                    }
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-[family-name:var(--font-ui)] text-xs transition-colors",
-                      active
-                        ? "bg-[var(--ink)] text-[var(--paper)]"
-                        : "bg-[rgba(45,42,38,0.06)] text-[var(--ink-muted)] hover:text-[var(--ink)]",
-                    )}
-                  >
-                    <Icon className="h-3 w-3" strokeWidth={1.5} />
-                    {meta.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
-              Rotation
-            </p>
-            <div className="mt-2 flex items-center gap-2">
-              <button
-                type="button"
-                aria-label="Rotate left"
-                onClick={() =>
-                  upsertMapRegion({
-                    ...selectedRegion,
-                    rotation: normalizeDeg(
-                      (selectedRegion.rotation ?? 0) - 15,
-                    ),
-                  })
-                }
-                className="rounded-full border border-[rgba(45,42,38,0.12)] p-1.5 text-[var(--ink-muted)] hover:text-[var(--ink)]"
-              >
-                <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} />
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={360}
-                step={1}
-                value={Math.round(selectedRegion.rotation ?? 0)}
-                onChange={(e) =>
-                  upsertMapRegion({
-                    ...selectedRegion,
-                    rotation: normalizeDeg(Number(e.target.value)),
-                  })
-                }
-                className="h-1.5 flex-1 cursor-pointer accent-[var(--ink)]"
-              />
-              <button
-                type="button"
-                aria-label="Rotate right"
-                onClick={() =>
-                  upsertMapRegion({
-                    ...selectedRegion,
-                    rotation: normalizeDeg(
-                      (selectedRegion.rotation ?? 0) + 15,
-                    ),
-                  })
-                }
-                className="rounded-full border border-[rgba(45,42,38,0.12)] p-1.5 text-[var(--ink-muted)] hover:text-[var(--ink)]"
-              >
-                <RotateCw className="h-3.5 w-3.5" strokeWidth={1.5} />
-              </button>
-              <span className="min-w-[2.75rem] text-right font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
-                {Math.round(selectedRegion.rotation ?? 0)}°
-              </span>
-            </div>
-            <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
-              Wash
+              {(selectedRegion.kind ?? "territory") === "building"
+                ? "Color"
+                : selectedIsIcon
+                  ? "Color"
+                  : "Wash"}
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {MAP_TERRITORY_PALETTE.map((swatch) => (
@@ -1677,7 +2581,10 @@ export function MapPage() {
                   title={swatch.label}
                   aria-label={swatch.label}
                   onClick={() =>
-                    upsertMapRegion({ ...selectedRegion, color: swatch.id })
+                    upsertMapRegion({
+                      ...selectedRegion,
+                      color: swatch.id,
+                    })
                   }
                   className={cn(
                     "h-6 w-6 rounded-md border transition-transform",
@@ -1690,7 +2597,13 @@ export function MapPage() {
               ))}
             </div>
             <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.65rem] leading-relaxed text-[var(--ink-faint)]">
-              Drag to move · corner handles reshape · top handle rotates
+              {selectedRegion.kind === "building"
+                ? "Drag to move · color-code buildings from the swatches"
+                : selectedIsIcon
+                ? "Drag to move · change Kind to Territory for area controls"
+                : selectedIsPolygon
+                  ? "Drag the outline points to reshape · drag the fill to move"
+                  : "Drag to move · corner handles reshape · top handle rotates"}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
@@ -1703,23 +2616,167 @@ export function MapPage() {
               >
                 Remove
               </Button>
+              {!selectedIsIcon && !selectedIsPolygon ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    upsertMapRegion({
+                      ...selectedRegion,
+                      rotation: 0,
+                    })
+                  }
+                >
+                  Reset angle
+                </Button>
+              ) : null}
+            </div>
+          </motion.div>
+        ) : null}
+
+        {selectedPath && !selectedRegion && !selectedPin && !selectedLabel ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="folio-chrome absolute bottom-5 left-5 right-20 max-w-sm rounded-2xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.95)] p-4 shadow-[0_16px_40px_rgba(45,42,38,0.1)] backdrop-blur-xl sm:right-auto"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
+                  {MAP_PATH_KIND_META[selectedPath.kind].label}
+                </p>
+                <input
+                  value={selectedPath.name}
+                  onChange={(e) =>
+                    upsertMapPath({ ...selectedPath, name: e.target.value })
+                  }
+                  className="mt-1 w-full bg-transparent font-[family-name:var(--font-display)] text-xl font-medium tracking-wide text-[var(--ink)] outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setSelectedPathId(null)}
+                className="rounded-lg p-1 text-[var(--ink-faint)] hover:text-[var(--ink)]"
+              >
+                <X className="h-4 w-4" strokeWidth={1.5} />
+              </button>
+            </div>
+            <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.65rem] leading-relaxed text-[var(--ink-faint)]">
+              {selectedPath.points.length} points · click another route to edit
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 size="sm"
-                variant="ghost"
-                onClick={() =>
-                  upsertMapRegion({
-                    ...selectedRegion,
-                    rotation: 0,
-                  })
-                }
+                variant="outline"
+                onClick={() => {
+                  removeMapPath(selectedPath.id);
+                  setSelectedPathId(null);
+                }}
               >
-                Reset angle
+                Remove
               </Button>
             </div>
           </motion.div>
         ) : null}
 
-        {selectedPin && !selectedRegion ? (
+        {selectedChronicle &&
+        selectedChronicle.mapMarker &&
+        !selectedRegion &&
+        !selectedPin &&
+        !selectedLabel &&
+        !selectedPath ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="folio-chrome absolute bottom-5 left-5 right-20 max-w-sm rounded-2xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.95)] p-4 shadow-[0_16px_40px_rgba(45,42,38,0.1)] backdrop-blur-xl sm:right-auto"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
+                  Chronicle
+                </p>
+                <h2 className="mt-1 font-[family-name:var(--font-display)] text-xl font-medium tracking-wide text-[var(--ink)]">
+                  {selectedChronicle.title}
+                </h2>
+                {selectedChronicle.whenLabel ? (
+                  <p className="mt-1 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
+                    {selectedChronicle.whenLabel}
+                  </p>
+                ) : null}
+                {selectedChronicle.summary ? (
+                  <p className="mt-2 line-clamp-2 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
+                    {selectedChronicle.summary}
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setSelectedChronicleId(null)}
+                className="rounded-lg p-1 text-[var(--ink-faint)] hover:text-[var(--ink)]"
+              >
+                <X className="h-4 w-4" strokeWidth={1.5} />
+              </button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => router.push("/chronicle")}>
+                Open chronicle
+              </Button>
+            </div>
+          </motion.div>
+        ) : null}
+
+        {selectedLabel && !selectedRegion && !selectedPin ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="folio-chrome absolute bottom-5 left-5 right-20 max-w-sm rounded-2xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.95)] p-4 shadow-[0_16px_40px_rgba(45,42,38,0.1)] backdrop-blur-xl sm:right-auto"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
+                  Label
+                </p>
+                <input
+                  value={selectedLabel.text}
+                  onChange={(e) =>
+                    upsertMapLabel({
+                      ...selectedLabel,
+                      text: e.target.value,
+                    })
+                  }
+                  className="mt-1 w-full bg-transparent font-[family-name:var(--font-display)] text-xl font-medium tracking-wide text-[var(--ink)] outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                aria-label="Close"
+                onClick={() => setSelectedLabelId(null)}
+                className="rounded-lg p-1 text-[var(--ink-faint)] hover:text-[var(--ink)]"
+              >
+                <X className="h-4 w-4" strokeWidth={1.5} />
+              </button>
+            </div>
+            <p className="mt-3 font-[family-name:var(--font-ui)] text-[0.65rem] leading-relaxed text-[var(--ink-faint)]">
+              Drag to move on the board
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  removeMapLabel(selectedLabel.id);
+                  setSelectedLabelId(null);
+                }}
+              >
+                Remove
+              </Button>
+            </div>
+          </motion.div>
+        ) : null}
+
+        {selectedPin && !selectedRegion && !selectedLabel ? (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
