@@ -1,7 +1,7 @@
 {
-  "name": "Folio",
+  "name": "Folio Desk",
   "short_name": "Folio",
-  "description": "A place for writing — draft on your phone, continue on your desk.",
+  "description": "A quiet novel studio — write the book, keep a world bible beside it.",
   "start_url": "/m",
   "scope": "/",
   "display": "standalone",

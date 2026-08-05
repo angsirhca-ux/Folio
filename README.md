@@ -1,6 +1,6 @@
-# Folio
+# Folio Desk
 
-A premium writing application that feels like writing inside a beautifully printed novel.
+A quiet novel studio — write the manuscript, keep a world bible beside it, and invite help only when you want it.
 
 Less software. More book.
 
@@ -13,9 +13,9 @@ Less software. More book.
 
 ## Stack
 
-Next.js · React · TypeScript · Tailwind CSS · Tiptap · Framer Motion
+Next.js · React · TypeScript · Tailwind CSS · Tiptap · Framer Motion · Electron
 
-## Develop
+## Develop (web)
 
 ```bash
 npm install
@@ -24,12 +24,49 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Desktop app
+
+Folio Desk ships as a native desktop app via Electron. The app bundles a local Next.js server — your manuscripts stay on your machine.
+
+### Run in development
+
+Starts Next.js and opens the Electron shell:
+
+```bash
+npm run desktop:dev
+```
+
+### Run a production build locally
+
+```bash
+npm run desktop:start
+```
+
+### Package for distribution
+
+Build an installable app in `dist-desktop/`:
+
+```bash
+# macOS — .app folder (fast, good for testing)
+npm run desktop:dist:dir
+
+# macOS — signed DMG + ZIP (requires Apple Developer ID for signing)
+npm run desktop:dist:mac
+
+# All platforms configured in electron-builder.yml
+npm run desktop:dist
+```
+
+**API keys:** Put your `.env.local` values in `~/Library/Application Support/Folio Desk/.env` (macOS) so Clarence and other AI features work in the packaged app.
+
 ## Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
 | ⌘ O | Upload manuscript |
 | ⌘ E | Export EPUB / PDF / Word / text |
+| ⌘ F | Find & replace (manuscript) |
+| ⌘ K | Project search |
 | ⌘ ⌥ F | Focus mode |
 | ⌘ \ | Toggle sidebar |
 | ⌘ ⇧ N | Chapter notes |
@@ -55,4 +92,3 @@ Open Export from the download icon in the toolbar, via Settings, or with `⌘ E`
 ## Philosophy
 
 Would Apple ship this? Would it feel at home in a beautifully typeset classic? If not, redesign.
-# Folio

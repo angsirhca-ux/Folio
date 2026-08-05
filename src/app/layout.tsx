@@ -40,15 +40,15 @@ const crimson = Crimson_Pro({
 });
 
 export const metadata: Metadata = {
-  title: "Folio — A place for writing",
+  title: "Folio Desk — A place for writing",
   description:
-    "A premium writing application that feels like writing inside a beautifully printed novel.",
-  applicationName: "Folio",
+    "A quiet novel studio — write the book, keep a world bible beside it, and invite help only when you want it.",
+  applicationName: "Folio Desk",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Folio",
+    title: "Folio Desk",
   },
   icons: {
     icon: [

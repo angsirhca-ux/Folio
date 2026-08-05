@@ -19,6 +19,10 @@
 
 # production
 /build
+/dist-desktop
+
+# electron
+*.log
 
 # misc
 .DS_Store

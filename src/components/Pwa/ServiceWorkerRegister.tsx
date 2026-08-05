@@ -8,6 +8,8 @@ export function ServiceWorkerRegister() {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
     if (process.env.NODE_ENV === "development") return;
+    // Electron already ships a local server — skip the PWA worker.
+    if (window.folioDesk?.isDesktop) return;
     void navigator.serviceWorker.register("/sw.js").catch(() => {
       /* ignore */
     });

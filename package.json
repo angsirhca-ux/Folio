@@ -1,12 +1,22 @@
 {
   "name": "folio",
+  "productName": "Folio Desk",
   "version": "0.1.0",
   "private": true,
+  "description": "Folio Desk — a quiet novel studio for the manuscript and its world.",
+  "author": "Folio Desk",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "desktop:dev": "concurrently -k -n next,desk -c blue,magenta \"next dev\" \"wait-on http://127.0.0.1:3000 && electron .\"",
+    "desktop:prepare": "next build && node electron/prepare-standalone.cjs",
+    "desktop:start": "npm run desktop:prepare && FOLIO_USE_STANDALONE=1 electron .",
+    "desktop:dist": "npm run desktop:prepare && electron-builder --config electron-builder.yml",
+    "desktop:dist:mac": "npm run desktop:prepare && electron-builder --config electron-builder.yml --mac",
+    "desktop:dist:dir": "npm run desktop:prepare && electron-builder --config electron-builder.yml --dir"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -50,9 +60,13 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.2.4",
+    "electron": "^37.10.3",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wait-on": "^8.0.5"
   }
 }

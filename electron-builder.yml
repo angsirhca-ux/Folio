@@ -1,0 +1,40 @@
+appId: app.foliodesk.desktop
+productName: Folio Desk
+copyright: Copyright © Folio Desk
+icon: electron/resources/icon.png
+directories:
+  output: dist-desktop
+  buildResources: electron/resources
+# Shell only — Next runs from extraResources/standalone
+files:
+  - electron/main.cjs
+  - electron/preload.cjs
+  - package.json
+  - "!**/node_modules/**"
+extraResources:
+  - from: .next/standalone/server.js
+    to: standalone/server.js
+  - from: .next/standalone/package.json
+    to: standalone/package.json
+  - from: .next/standalone/public
+    to: standalone/public
+  - from: .next/standalone/.next
+    to: standalone/.next
+  - from: .next/standalone/node_modules
+    to: standalone/node_modules
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  gatekeeperAssess: false
+dmg:
+  title: Folio Desk
+linux:
+  target:
+    - AppImage
+  category: Office
+win:
+  target:
+    - nsis
