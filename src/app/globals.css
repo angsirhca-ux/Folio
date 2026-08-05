@@ -101,6 +101,7 @@ body {
 .manuscript-editor .ProseMirror {
   outline: none;
   min-height: 60vh;
+  text-align: left;
 }
 
 .manuscript-editor.scene-write-editor,
@@ -155,6 +156,7 @@ body {
 .manuscript-editor p {
   margin: 0;
   text-align: justify;
+  text-align-last: left;
   text-justify: inter-word;
   hyphens: auto;
   -webkit-hyphens: auto;
@@ -205,7 +207,7 @@ body {
 }
 
 .manuscript-editor hr,
-.manuscript-editor p:has(> br:only-child) {
+.manuscript-editor .ProseMirror > p.is-empty {
   border: none;
 }
 
@@ -254,14 +256,17 @@ body {
   letter-spacing: 0.01em;
 }
 
-/* Centered scene breaks when a paragraph is only ornaments */
-.manuscript-editor p:has(> br:only-child) {
-  text-align: center;
+/* Empty editable shells only — do NOT use :has(> br:only-child).
+   TipTap puts a trailing <br> in many paragraphs; text nodes don’t count as
+   siblings, so that selector was centering the whole manuscript. */
+.manuscript-editor .ProseMirror > p.is-empty {
+  text-align: left;
   text-indent: 0;
 }
 
 .scene-break {
   text-align: center !important;
+  text-align-last: center !important;
   text-indent: 0 !important;
   letter-spacing: 0.45em;
   color: var(--ink-muted);

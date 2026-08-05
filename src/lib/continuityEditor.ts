@@ -1,4 +1,4 @@
-import { chapterToPlainText, formatMemoryBlocks } from "./developmentalEditor";
+import { asObjectArray, chapterToPlainText, formatMemoryBlocks } from "./developmentalEditor";
 import {
   MANUSCRIPT_CONTEXT_BUDGET,
   packBalancedExcerpts,
@@ -81,7 +81,16 @@ export function normalizeContinuityPayload(
   book: Pick<Book, "chapters" | "title">,
 ): { pass: DevelopmentalPass; memoryUpdates: DevelopmentalMemoryNote[] } {
   const allowed = new Set(CONTINUITY_CATEGORIES);
-  const flags: DevelopmentalFlag[] = (payload.flags ?? [])
+  const flags: DevelopmentalFlag[] = asObjectArray<{
+    category: DevelopmentalFlagCategory;
+    severity?: string;
+    excerpt?: string;
+    note?: string;
+    suggestions?: unknown;
+    chapterId?: string;
+    chapterTitle?: string;
+    sceneIndex?: number;
+  }>(payload?.flags)
     .filter((f) => f && allowed.has(f.category))
     .filter((f) => f.excerpt?.trim() && f.note?.trim())
     .slice(0, 60)
@@ -97,9 +106,9 @@ export function normalizeContinuityPayload(
         severity:
           f.severity === "issue" || f.severity === "watch" || f.severity === "note"
             ? f.severity
-            : "watch",
-        excerpt: f.excerpt.trim().slice(0, 280),
-        note: f.note.trim().slice(0, 600),
+            : ("watch" as DevelopmentalSeverity),
+        excerpt: f.excerpt!.trim().slice(0, 280),
+        note: f.note!.trim().slice(0, 600),
         suggestions: normalizeSuggestions(f.suggestions),
         verdict: null,
         closed: false,
@@ -118,14 +127,17 @@ export function normalizeContinuityPayload(
     flags,
   };
 
-  const memoryUpdates: DevelopmentalMemoryNote[] = (payload.memoryUpdates ?? [])
+  const memoryUpdates: DevelopmentalMemoryNote[] = asObjectArray<{
+    kind?: string;
+    text?: string;
+  }>(payload?.memoryUpdates)
     .filter((m) => m?.text?.trim())
     .slice(0, 10)
     .map((m) => ({
       id: createId(),
       at: Date.now(),
       kind: m.kind === "continuity" ? "continuity" : "general",
-      text: m.text.trim().slice(0, 400),
+      text: m.text!.trim().slice(0, 400),
     }));
 
   return { pass, memoryUpdates };

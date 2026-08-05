@@ -395,7 +395,8 @@ export function DevelopmentalPanel({
   const grouped = useMemo(() => {
     if (!activePass) return [];
     const map = new Map<string, DevelopmentalFlag[]>();
-    for (const f of activePass.flags) {
+    const flags = Array.isArray(activePass.flags) ? activePass.flags : [];
+    for (const f of flags) {
       if (f.closed) continue;
       const list = map.get(f.category) ?? [];
       list.push(f);
@@ -404,10 +405,10 @@ export function DevelopmentalPanel({
     return [...map.entries()];
   }, [activePass]);
 
-  const openFlagCount = useMemo(
-    () => activePass?.flags.filter((f) => !f.closed).length ?? 0,
-    [activePass],
-  );
+  const openFlagCount = useMemo(() => {
+    const flags = Array.isArray(activePass?.flags) ? activePass.flags : [];
+    return flags.filter((f) => !f.closed).length;
+  }, [activePass]);
 
   return (
     <AnimatePresence>

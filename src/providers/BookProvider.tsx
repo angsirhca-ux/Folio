@@ -82,6 +82,7 @@ import { parsedToBook } from "@/lib/import/parse";
 import type { ParsedManuscript } from "@/lib/import/types";
 import {
   extractChapterHeading,
+  renumberNumberedChapters,
   replaceChapterHeading,
   syncChapterTitleField,
 } from "@/lib/chapterHeading";
@@ -236,7 +237,9 @@ interface BookContextValue {
   updateChapterTitle: (chapterId: string, title: string) => void;
   updateChapterSummary: (chapterId: string, summary: string) => void;
   updateChapterNotes: (notes: string) => void;
-  addChapter: () => void;
+  addChapter: (afterChapterId?: string) => void;
+  /** Retitle “Chapter N” entries to match current order (custom names left alone). */
+  renumberChapters: () => void;
   deleteChapter: (chapterId: string) => void;
   deleteManuscript: () => void;
   /** Library shelf — all manuscripts in this browser. */
@@ -1321,28 +1324,41 @@ export function BookProvider({ children }: { children: ReactNode }) {
               : c,
           ),
         })),
-      addChapter: () => {
+      addChapter: (afterChapterId) => {
         const id = createId();
-        const n = book.chapters.length + 1;
-        const scene = createScene({ title: "Untitled Scene", status: "outline" });
-        updateBook((b) => ({
-          ...b,
-          activeChapterId: id,
-          chapters: [
-            ...b.chapters,
-            {
-              id,
-              title: `Chapter ${n}`,
-              summary: "",
-              content: `<h1>Chapter ${n}</h1><p></p>`,
-              notes: "",
-              scenes: [scene],
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            },
-          ],
-        }));
+        const scene = createScene({
+          title: "Untitled Scene",
+          status: "outline",
+        });
+        updateBook((b) => {
+          const anchorId = afterChapterId || b.activeChapterId;
+          const after = b.chapters.findIndex((c) => c.id === anchorId);
+          const insertAt = after >= 0 ? after + 1 : b.chapters.length;
+          const n = insertAt + 1;
+          const chapter = {
+            id,
+            title: `Chapter ${n}`,
+            summary: "",
+            content: `<h1>Chapter ${n}</h1><p></p>`,
+            notes: "",
+            scenes: [scene],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          };
+          const chapters = renumberNumberedChapters([
+            ...b.chapters.slice(0, insertAt),
+            chapter,
+            ...b.chapters.slice(insertAt),
+          ]);
+          return { ...b, activeChapterId: id, chapters };
+        });
       },
+      renumberChapters: () =>
+        updateBook((b) => {
+          const chapters = renumberNumberedChapters(b.chapters);
+          if (chapters === b.chapters) return b;
+          return { ...b, chapters };
+        }),
       deleteChapter: (chapterId) =>
         updateBook((b) => trashChapterFromBook(b, chapterId)),
       deleteManuscript: () => {

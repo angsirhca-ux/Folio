@@ -232,7 +232,7 @@ export function StoryboardPage() {
         onSortChange={setSort}
         zoom={zoom}
         onZoomChange={setStoryboardZoom}
-        onNewChapter={() => addChapter()}
+        onNewChapter={() => addChapter(book.activeChapterId)}
         onNewScene={() => addScene()}
       />
 
@@ -304,7 +304,7 @@ export function StoryboardPage() {
 
         {totalScenes === 0 ? (
           <EmptyStoryboard
-            onNewChapter={() => addChapter()}
+            onNewChapter={() => addChapter(book.activeChapterId)}
             onNewScene={() => addScene()}
           />
         ) : null}

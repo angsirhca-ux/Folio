@@ -13,7 +13,6 @@ const {
   BrowserWindow,
   shell,
   Menu,
-  MenuItem,
   utilityProcess,
   ipcMain,
 } = require("electron");
@@ -251,77 +250,21 @@ function createWindow(url) {
   }
 
   mainWindow.webContents.on("context-menu", (_event, params) => {
-    const menu = new Menu();
-    let added = false;
-
-    for (const suggestion of params.dictionarySuggestions || []) {
-      menu.append(
-        new MenuItem({
-          label: suggestion,
-          click: () => {
-            mainWindow?.webContents.replaceMisspelling(suggestion);
-          },
-        }),
-      );
-      added = true;
-    }
-
-    if (params.misspelledWord) {
-      if (added) menu.append(new MenuItem({ type: "separator" }));
-      menu.append(
-        new MenuItem({
-          label: "Add to Dictionary",
-          click: () => {
-            mainWindow?.webContents.session.addWordToSpellCheckerDictionary(
-              params.misspelledWord,
-            );
-          },
-        }),
-      );
-      added = true;
-    }
-
+    // Hand the menu to the renderer so Folio can draw paper/ink UI instead of
+    // the OS chrome menu. Spell suggestions still come from Electron.
     const raw =
       (params.selectionText || params.misspelledWord || "").trim().split(/\s+/)[0] ||
       "";
     const word = raw.replace(/^[^\p{L}\p{N}'’]+|[^\p{L}\p{N}'’]+$/gu, "");
-    if (word && params.isEditable) {
-      if (added) menu.append(new MenuItem({ type: "separator" }));
-      const labelWord = word.length > 28 ? `${word.slice(0, 28)}…` : word;
-      menu.append(
-        new MenuItem({
-          label: `Synonyms for “${labelWord}”`,
-          click: () => {
-            mainWindow?.webContents.send("folio:thesaurus", {
-              word,
-              x: params.x,
-              y: params.y,
-            });
-          },
-        }),
-      );
-      added = true;
-    }
-
-    if (params.isEditable) {
-      if (added) menu.append(new MenuItem({ type: "separator" }));
-      menu.append(new MenuItem({ role: "cut" }));
-      menu.append(new MenuItem({ role: "copy" }));
-      menu.append(new MenuItem({ role: "paste" }));
-      menu.append(new MenuItem({ type: "separator" }));
-      menu.append(new MenuItem({ role: "selectAll" }));
-      added = true;
-    } else if (params.selectionText) {
-      menu.append(new MenuItem({ role: "copy" }));
-      added = true;
-    }
-
-    if (added) {
-      menu.popup({
-        window: mainWindow ?? undefined,
-        frame: params.frame,
-      });
-    }
+    mainWindow?.webContents.send("folio:editor-context-menu", {
+      x: params.x,
+      y: params.y,
+      selectionText: params.selectionText || "",
+      misspelledWord: params.misspelledWord || "",
+      dictionarySuggestions: params.dictionarySuggestions || [],
+      isEditable: Boolean(params.isEditable),
+      word,
+    });
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -450,6 +393,18 @@ ipcMain.handle("folio:open-external", async (_event, url) => {
     throw new Error("Invalid external URL");
   }
   await shell.openExternal(url);
+});
+
+ipcMain.handle("folio:replace-misspelling", (_event, text) => {
+  if (typeof text !== "string" || !text) return false;
+  mainWindow?.webContents.replaceMisspelling(text);
+  return true;
+});
+
+ipcMain.handle("folio:add-spell-word", (_event, word) => {
+  if (typeof word !== "string" || !word.trim()) return false;
+  mainWindow?.webContents.session.addWordToSpellCheckerDictionary(word.trim());
+  return true;
 });
 
 // macOS: open from custom protocol while app is running / cold-started

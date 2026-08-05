@@ -333,7 +333,7 @@ export function OutlinePage() {
         onScaleChange={setOutlineScale}
         onCollapseAll={collapseAll}
         onExpandAll={expandAll}
-        onAddChapter={() => addChapter()}
+        onAddChapter={() => addChapter(book.activeChapterId)}
         onManageThreads={() => setThreadsOpen(true)}
         populateSlot={
           <ManuscriptIndexControls

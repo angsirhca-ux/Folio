@@ -80,3 +80,47 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+/** “Chapter 3”, “Chapter 3 — Dawn”, etc. */
+const NUMBERED_CHAPTER_RE = /^(chapter)\s+(\d+)(.*)$/i;
+
+/**
+ * If title looks like a numbered chapter, rewrite the number (keep any suffix).
+ * Returns null when the title should be left alone (custom names).
+ */
+export function applyChapterNumber(title: string, n: number): string | null {
+  const trimmed = title.trim();
+  const match = NUMBERED_CHAPTER_RE.exec(trimmed);
+  if (!match) return null;
+  const suffix = match[3] ?? "";
+  return `Chapter ${n}${suffix}`;
+}
+
+/**
+ * Retitle “Chapter N …” entries to match list order, and sync each leading H1.
+ * Custom titles (anything not “Chapter &lt;number&gt;…”) are unchanged.
+ */
+export function renumberNumberedChapters<
+  T extends { title: string; content: string; updatedAt?: number },
+>(chapters: T[]): T[] {
+  const now = Date.now();
+  let changed = false;
+  const next = chapters.map((chapter, index) => {
+    const n = index + 1;
+    const fromTitle = applyChapterNumber(chapter.title, n);
+    if (!fromTitle) return chapter;
+
+    const content = replaceChapterHeading(chapter.content, fromTitle);
+    if (fromTitle === chapter.title && content === chapter.content) {
+      return chapter;
+    }
+    changed = true;
+    return {
+      ...chapter,
+      title: fromTitle,
+      content,
+      updatedAt: now,
+    };
+  });
+  return changed ? next : chapters;
+}

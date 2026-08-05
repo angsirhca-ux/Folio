@@ -3,88 +3,131 @@
 import { useCallback, useEffect, useState } from "react";
 import { useManuscriptEditor } from "@/providers/ManuscriptEditorContext";
 import {
+  normalizeLookupWord,
   replaceEditorRange,
+  wordAtEditorCoords,
   wordAtEditorSelection,
   type ThesaurusHit,
   type ThesaurusResult,
 } from "@/lib/thesaurus";
-import { ThesaurusPopover } from "@/components/Editor/ThesaurusPopover";
-
-type OpenState = {
-  query: string;
-  from: number;
-  to: number;
-  x: number;
-  y: number;
-};
+import {
+  EditorContextMenu,
+  type EditorContextMenuState,
+} from "@/components/Editor/EditorContextMenu";
 
 /**
- * Spellcheck is native (browser / Electron). This host adds the thesaurus:
- * ⌘⇧T on a word, or Folio Desk right-click → Synonyms.
+ * Spellcheck + thesaurus for the manuscript.
+ * Folio Desk: in-app context menu (not the OS chrome menu).
+ * Browser: same Folio menu on right-click in the editor.
  */
 export function WordToolsHost() {
   const { editor } = useManuscriptEditor();
-  const [open, setOpen] = useState<OpenState | null>(null);
+  const [menu, setMenu] = useState<EditorContextMenuState | null>(null);
+  const [thesaurusOpen, setThesaurusOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [synonyms, setSynonyms] = useState<ThesaurusHit[]>([]);
   const [related, setRelated] = useState<ThesaurusHit[]>([]);
 
-  const close = useCallback(() => {
-    setOpen(null);
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    setThesaurusOpen(false);
     setError(null);
     setSynonyms([]);
     setRelated([]);
     setLoading(false);
   }, []);
 
-  const lookup = useCallback(
-    async (opts: {
-      word: string;
-      from?: number;
-      to?: number;
+  const fetchThesaurus = useCallback(async (word: string) => {
+    const q = normalizeLookupWord(word);
+    if (!q) return;
+    setThesaurusOpen(true);
+    setLoading(true);
+    setError(null);
+    setSynonyms([]);
+    setRelated([]);
+    try {
+      const res = await fetch(`/api/thesaurus?q=${encodeURIComponent(q)}`);
+      const data = (await res.json()) as ThesaurusResult & { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error || "Lookup failed.");
+      }
+      setSynonyms(data.synonyms ?? []);
+      setRelated(data.related ?? []);
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Thesaurus is unreachable right now.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const resolveSpan = useCallback(
+    (payload: {
       x: number;
       y: number;
+      selectionText?: string;
+      misspelledWord?: string;
+      word?: string;
     }) => {
-      if (!editor || editor.isDestroyed) return;
-      const span =
-        opts.from != null && opts.to != null
-          ? { word: opts.word, from: opts.from, to: opts.to }
-          : wordAtEditorSelection(editor);
-      const word = (span?.word || opts.word).trim();
-      if (!word) return;
-
-      const from = span?.from ?? editor.state.selection.from;
-      const to = span?.to ?? editor.state.selection.to;
-
-      setOpen({ query: word, from, to, x: opts.x, y: opts.y });
-      setLoading(true);
-      setError(null);
-      setSynonyms([]);
-      setRelated([]);
-
-      try {
-        const res = await fetch(
-          `/api/thesaurus?q=${encodeURIComponent(word)}`,
-        );
-        const data = (await res.json()) as ThesaurusResult & { error?: string };
-        if (!res.ok) {
-          throw new Error(data.error || "Lookup failed.");
-        }
-        setSynonyms(data.synonyms ?? []);
-        setRelated(data.related ?? []);
-      } catch (e) {
-        setError(
-          e instanceof Error ? e.message : "Thesaurus is unreachable right now.",
-        );
-      } finally {
-        setLoading(false);
+      if (!editor || editor.isDestroyed) return null;
+      if (!editor.state.selection.empty) {
+        return wordAtEditorSelection(editor);
       }
+      return (
+        wordAtEditorCoords(editor, payload.x, payload.y) ||
+        wordAtEditorSelection(editor)
+      );
     },
     [editor],
   );
 
-  // ⌘⇧T — synonyms for the word at the caret / selection
+  const openMenuFromPayload = useCallback(
+    (payload: {
+      x: number;
+      y: number;
+      selectionText?: string;
+      misspelledWord?: string;
+      dictionarySuggestions?: string[];
+      isEditable?: boolean;
+      word?: string;
+    }) => {
+      const span = resolveSpan(payload);
+      const word =
+        span?.word ||
+        normalizeLookupWord(payload.word || "") ||
+        normalizeLookupWord(
+          (payload.selectionText || payload.misspelledWord || "")
+            .trim()
+            .split(/\s+/)[0] || "",
+        );
+      const hasSelection = Boolean(
+        (payload.selectionText && payload.selectionText.length > 0) ||
+          (editor && !editor.isDestroyed && !editor.state.selection.empty),
+      );
+
+      setThesaurusOpen(false);
+      setError(null);
+      setSynonyms([]);
+      setRelated([]);
+      setLoading(false);
+      setMenu({
+        x: payload.x,
+        y: payload.y,
+        word,
+        wordFrom: span?.from ?? null,
+        wordTo: span?.to ?? null,
+        misspelledWord: (payload.misspelledWord || "").trim(),
+        suggestions: payload.dictionarySuggestions ?? [],
+        isEditable: payload.isEditable !== false,
+        hasSelection,
+      });
+    },
+    [editor, resolveSpan],
+  );
+
+  // ⌘⇧T — open menu on the word and expand synonyms
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -95,55 +138,198 @@ export function WordToolsHost() {
       const span = wordAtEditorSelection(editor);
       if (!span) return;
       const coords = editor.view.coordsAtPos(span.from);
-      void lookup({
-        word: span.word,
-        from: span.from,
-        to: span.to,
+      setMenu({
         x: coords.left,
         y: coords.bottom,
+        word: span.word,
+        wordFrom: span.from,
+        wordTo: span.to,
+        misspelledWord: "",
+        suggestions: [],
+        isEditable: true,
+        hasSelection: !editor.state.selection.empty,
       });
+      void fetchThesaurus(span.word);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, lookup]);
+  }, [editor, fetchThesaurus]);
 
-  // Folio Desk native context menu → Synonyms
+  // Intercept manuscript right-click — Folio paper menu, not OS chrome.
   useEffect(() => {
-    const unsub = window.folioDesk?.onThesaurus?.((payload) => {
+    const onContext = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest?.(".manuscript-editor .ProseMirror")) return;
       if (!editor || editor.isDestroyed) return;
-      const span = wordAtEditorSelection(editor);
-      void lookup({
-        word: payload.word,
-        from: span?.from,
-        to: span?.to,
-        x: payload.x ?? window.innerWidth / 2 - 120,
-        y: payload.y ?? window.innerHeight / 3,
+      e.preventDefault();
+      e.stopPropagation();
+      const span =
+        wordAtEditorCoords(editor, e.clientX, e.clientY) ||
+        wordAtEditorSelection(editor);
+      openMenuFromPayload({
+        x: e.clientX,
+        y: e.clientY,
+        selectionText: editor.state.doc.textBetween(
+          editor.state.selection.from,
+          editor.state.selection.to,
+          " ",
+        ),
+        word: span?.word,
+        isEditable: editor.isEditable,
+        dictionarySuggestions: [],
+        misspelledWord: "",
+      });
+    };
+    document.addEventListener("contextmenu", onContext, true);
+    return () => document.removeEventListener("contextmenu", onContext, true);
+  }, [editor, openMenuFromPayload]);
+
+  // Folio Desk: merge Electron spell suggestions; legacy thesaurus IPC.
+  useEffect(() => {
+    const unsub = window.folioDesk?.onEditorContextMenu?.((payload) => {
+      setMenu((prev) => {
+        if (!prev) {
+          // Renderer may not have opened yet (non-manuscript click) — open now.
+          queueMicrotask(() => openMenuFromPayload(payload));
+          return prev;
+        }
+        const near =
+          Math.abs(payload.x - prev.x) < 64 &&
+          Math.abs(payload.y - prev.y) < 64;
+        if (!near) {
+          queueMicrotask(() => openMenuFromPayload(payload));
+          return prev;
+        }
+        return {
+          ...prev,
+          misspelledWord:
+            (payload.misspelledWord || "").trim() || prev.misspelledWord,
+          suggestions:
+            (payload.dictionarySuggestions?.length
+              ? payload.dictionarySuggestions
+              : prev.suggestions) ?? [],
+          word:
+            prev.word ||
+            normalizeLookupWord(payload.word || "") ||
+            normalizeLookupWord(
+              (payload.selectionText || payload.misspelledWord || "")
+                .trim()
+                .split(/\s+/)[0] || "",
+            ),
+        };
       });
     });
-    return () => unsub?.();
-  }, [editor, lookup]);
+    const unsubLegacy = window.folioDesk?.onThesaurus?.((payload) => {
+      openMenuFromPayload({
+        x: payload.x ?? window.innerWidth / 2 - 120,
+        y: payload.y ?? window.innerHeight / 3,
+        word: payload.word,
+        isEditable: true,
+      });
+      void fetchThesaurus(payload.word);
+    });
+    return () => {
+      unsub?.();
+      unsubLegacy?.();
+    };
+  }, [fetchThesaurus, openMenuFromPayload]);
 
-  const onPick = useCallback(
-    (word: string) => {
-      if (!editor || editor.isDestroyed || !open) return;
-      replaceEditorRange(editor, open.from, open.to, word);
-      close();
+  const replaceSpelling = useCallback(
+    (suggestion: string) => {
+      if (!editor || editor.isDestroyed) return;
+      if (window.folioDesk?.replaceMisspelling) {
+        void window.folioDesk.replaceMisspelling(suggestion);
+        return;
+      }
+      const misspelled = menu?.misspelledWord;
+      if (
+        menu?.wordFrom != null &&
+        menu.wordTo != null &&
+        menu.wordFrom < menu.wordTo
+      ) {
+        replaceEditorRange(editor, menu.wordFrom, menu.wordTo, suggestion);
+        return;
+      }
+      const span = wordAtEditorSelection(editor);
+      if (span) {
+        replaceEditorRange(editor, span.from, span.to, suggestion);
+        return;
+      }
+      if (misspelled) {
+        const $from = editor.state.selection.$from;
+        const parent = $from.parent;
+        if (!parent.isTextblock) return;
+        const start = $from.start();
+        const text = parent.textContent;
+        const idx = text.toLowerCase().indexOf(misspelled.toLowerCase());
+        if (idx < 0) return;
+        replaceEditorRange(
+          editor,
+          start + idx,
+          start + idx + misspelled.length,
+          suggestion,
+        );
+      }
     },
-    [editor, open, close],
+    [editor, menu],
+  );
+
+  const pickSynonym = useCallback(
+    (word: string) => {
+      if (!editor || editor.isDestroyed) return;
+      if (
+        menu?.wordFrom != null &&
+        menu.wordTo != null &&
+        menu.wordFrom < menu.wordTo
+      ) {
+        replaceEditorRange(editor, menu.wordFrom, menu.wordTo, word);
+        return;
+      }
+      const span = wordAtEditorSelection(editor);
+      if (span) replaceEditorRange(editor, span.from, span.to, word);
+    },
+    [editor, menu],
+  );
+
+  const addToDictionary = useCallback(() => {
+    const w = menu?.misspelledWord;
+    if (!w) return;
+    void window.folioDesk?.addToSpellCheckerDictionary?.(w);
+  }, [menu?.misspelledWord]);
+
+  const runEdit = useCallback(
+    (cmd: "cut" | "copy" | "paste" | "selectAll") => {
+      if (!editor || editor.isDestroyed) return;
+      editor.view.focus();
+      if (cmd === "selectAll") {
+        editor.commands.selectAll();
+        return;
+      }
+      document.execCommand(cmd);
+    },
+    [editor],
   );
 
   return (
-    <ThesaurusPopover
-      open={Boolean(open)}
-      query={open?.query ?? ""}
-      loading={loading}
-      error={error}
+    <EditorContextMenu
+      state={menu}
+      onClose={closeMenu}
+      onReplaceSpelling={replaceSpelling}
+      onAddToDictionary={addToDictionary}
+      onPickSynonym={pickSynonym}
+      onRequestSynonyms={() => {
+        if (!menu?.word) return;
+        void fetchThesaurus(menu.word);
+      }}
+      thesaurusOpen={thesaurusOpen}
+      thesaurusLoading={loading}
+      thesaurusError={error}
       synonyms={synonyms}
       related={related}
-      x={open?.x ?? 0}
-      y={open?.y ?? 0}
-      onPick={onPick}
-      onClose={close}
+      onCut={() => runEdit("cut")}
+      onCopy={() => runEdit("copy")}
+      onPaste={() => runEdit("paste")}
+      onSelectAll={() => runEdit("selectAll")}
     />
   );
 }

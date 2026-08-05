@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ChevronUp,
   GripVertical,
+  ListOrdered,
   PanelLeftClose,
   Plus,
   Trash2,
@@ -24,6 +25,7 @@ export function ChapterSidebar() {
     selectChapter,
     selectAdjacentChapter,
     addChapter,
+    renumberChapters,
     deleteChapter,
     updateChapterTitle,
     moveChapter,
@@ -353,14 +355,25 @@ export function ChapterSidebar() {
               })}
             </nav>
 
-            <button
-              type="button"
-              onClick={addChapter}
-              className="mt-4 flex items-center gap-2 rounded-md px-3 py-2.5 font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)] transition-colors duration-300 hover:bg-[var(--accent-soft)] hover:text-[var(--ink)]"
-            >
-              <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
-              New chapter
-            </button>
+            <div className="mt-4 flex flex-col gap-0.5">
+              <button
+                type="button"
+                onClick={() => addChapter(book.activeChapterId)}
+                className="flex items-center gap-2 rounded-md px-3 py-2.5 font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)] transition-colors duration-300 hover:bg-[var(--accent-soft)] hover:text-[var(--ink)]"
+              >
+                <Plus className="h-3.5 w-3.5" strokeWidth={1.5} />
+                New chapter
+              </button>
+              <button
+                type="button"
+                onClick={renumberChapters}
+                title="Retitle Chapter 1, Chapter 2, … to match the current order. Custom names are left alone."
+                className="flex items-center gap-2 rounded-md px-3 py-2.5 font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)] transition-colors duration-300 hover:bg-[var(--accent-soft)] hover:text-[var(--ink)]"
+              >
+                <ListOrdered className="h-3.5 w-3.5" strokeWidth={1.5} />
+                Renumber
+              </button>
+            </div>
 
             <div className="mt-4 space-y-1.5 border-t border-[var(--border)] px-2 pt-4">
               <p className="font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">

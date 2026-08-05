@@ -276,7 +276,7 @@ export function MobileWriteApp() {
           <button
             type="button"
             onClick={() => {
-              if (mode === "manuscript") addChapter();
+              if (mode === "manuscript") addChapter(book.activeChapterId);
               else addDumpPage();
             }}
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[rgba(45,42,38,0.15)] py-3 font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)] active:bg-[rgba(45,42,38,0.04)]"

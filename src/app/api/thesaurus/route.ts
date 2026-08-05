@@ -41,21 +41,45 @@ export async function GET(request: Request) {
 
   try {
     const encoded = encodeURIComponent(q.toLowerCase());
-    const [synonyms, related] = await Promise.all([
+    // Prefer synonyms; fall back to meaning-like + related triggers so common
+    // words still return something when Datamuse’s syn list is thin.
+    const [synonyms, related, triggers] = await Promise.all([
       datamuse(`rel_syn=${encoded}&max=24`),
-      datamuse(`ml=${encoded}&max=16`),
+      datamuse(`ml=${encoded}&max=20`),
+      datamuse(`rel_trg=${encoded}&max=12`),
     ]);
 
-    const seen = new Set(synonyms.map((s) => s.word.toLowerCase()));
-    seen.add(q.toLowerCase());
-    const relatedFiltered = related.filter(
-      (r) => !seen.has(r.word.toLowerCase()),
-    );
+    const seen = new Set<string>([q.toLowerCase()]);
+    const synOut: ThesaurusHit[] = [];
+    for (const h of synonyms) {
+      const key = h.word.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      synOut.push(h);
+    }
+    // If synonym list is empty, promote meaning-like matches into the main list
+    if (synOut.length === 0) {
+      for (const h of related) {
+        const key = h.word.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        synOut.push(h);
+        if (synOut.length >= 16) break;
+      }
+    }
+    const relatedFiltered: ThesaurusHit[] = [];
+    for (const h of [...related, ...triggers]) {
+      const key = h.word.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      relatedFiltered.push(h);
+      if (relatedFiltered.length >= 12) break;
+    }
 
     return NextResponse.json({
       query: q,
-      synonyms,
-      related: relatedFiltered.slice(0, 12),
+      synonyms: synOut,
+      related: relatedFiltered,
     });
   } catch {
     return NextResponse.json(

@@ -105,7 +105,7 @@ export function ensureDevelopmentalEditor(
   const passes = (Array.isArray(raw?.passes) ? raw.passes : []).map((p) => ({
     ...p,
     kind: migratePassKind(String(p.kind)),
-    flags: (p.flags ?? [])
+    flags: asObjectArray<DevelopmentalFlag>(p.flags)
       .map((f) => {
         const category = migrateFlagCategory(f.category);
         if (!category) return null;
@@ -298,6 +298,22 @@ export type ReviewPayload = {
   }>;
 };
 
+/** Claude sometimes returns a single object or keyed map instead of an array. */
+export function asObjectArray<T extends object>(raw: unknown): T[] {
+  if (Array.isArray(raw)) return raw.filter(Boolean) as T[];
+  if (raw && typeof raw === "object") {
+    const values = Object.values(raw as Record<string, unknown>);
+    if (values.length > 0 && values.every((v) => v && typeof v === "object")) {
+      return values as T[];
+    }
+    // Single flag/note object
+    if ("excerpt" in (raw as object) || "text" in (raw as object) || "note" in (raw as object)) {
+      return [raw as T];
+    }
+  }
+  return [];
+}
+
 function normalizeSuggestions(
   raw: unknown,
 ): [string, string] {
@@ -398,7 +414,13 @@ export function normalizeReviewPayload(
   payload: ReviewPayload,
   chapter: Pick<Chapter, "id" | "title">,
 ): { pass: DevelopmentalPass; memoryUpdates: DevelopmentalMemoryNote[] } {
-  const flags: DevelopmentalFlag[] = (payload.flags ?? [])
+  const flags: DevelopmentalFlag[] = asObjectArray<{
+    category?: string;
+    severity?: string;
+    excerpt?: string;
+    note?: string;
+    suggestions?: unknown;
+  }>(payload?.flags)
     .map((f) => {
       if (!f?.excerpt?.trim() || !f.note?.trim()) return null;
       const category = coerceFlagCategory(kind, f.category);
@@ -426,11 +448,14 @@ export function normalizeReviewPayload(
     chapterId: chapter.id,
     chapterTitle: chapter.title,
     createdAt: Date.now(),
-    summary: (payload.summary ?? "").trim().slice(0, 1200),
+    summary: (payload?.summary ?? "").trim().slice(0, 1200),
     flags,
   };
 
-  const memoryUpdates: DevelopmentalMemoryNote[] = (payload.memoryUpdates ?? [])
+  const memoryUpdates: DevelopmentalMemoryNote[] = asObjectArray<{
+    kind?: string;
+    text?: string;
+  }>(payload?.memoryUpdates)
     .filter((m) => m?.text?.trim())
     .slice(0, 8)
     .map((m) => ({
@@ -445,7 +470,7 @@ export function normalizeReviewPayload(
           : String(m.kind) === "line"
             ? "style"
             : "general",
-      text: m.text.trim().slice(0, 400),
+      text: m.text!.trim().slice(0, 400),
     }));
 
   return { pass, memoryUpdates };
@@ -500,7 +525,7 @@ export function patchDevelopmentalFlag(
       if (pass.id !== passId) return pass;
       return {
         ...pass,
-        flags: pass.flags.map((flag) =>
+        flags: asObjectArray<DevelopmentalFlag>(pass.flags).map((flag) =>
           flag.id === flagId ? { ...flag, ...partial } : flag,
         ),
       };
@@ -541,7 +566,9 @@ export function applyDevelopmentalFlagPatch(
   partial: Partial<Pick<DevelopmentalFlag, "verdict" | "closed">>,
 ): DevelopmentalEditorState {
   const pass = (state.passes ?? []).find((p) => p.id === passId);
-  const flag = pass?.flags.find((f) => f.id === flagId);
+  const flag = asObjectArray<DevelopmentalFlag>(pass?.flags).find(
+    (f) => f.id === flagId,
+  );
   let next = patchDevelopmentalFlag(state, passId, flagId, partial);
 
   if (
@@ -745,7 +772,7 @@ export function buildReviewContext(args: {
             const priorPass = priorPasses.find(
               (p) => p.chapterId === c.id && p.kind === args.kind,
             );
-            const openFlags = (priorPass?.flags ?? [])
+            const openFlags = asObjectArray<DevelopmentalFlag>(priorPass?.flags)
               .filter((f) => !f.closed)
               .slice(0, 3)
               .map((f) => `${f.category}: ${f.note.slice(0, 100)}`)
