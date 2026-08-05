@@ -25,7 +25,7 @@ export async function GET() {
 }
 
 type EnrichBody = {
-  book: Pick<Book, "title" | "chapters" | "characters">;
+  book: Pick<Book, "title" | "chapters" | "characters" | "clarenceContext">;
   characterId: string;
 };
 
@@ -70,6 +70,22 @@ export async function POST(request: Request) {
     );
   }
 
+  const authorHints = body.book.clarenceContext;
+  const hintsBlock =
+    authorHints?.narratorName?.trim() || authorHints?.authorNotes?.trim()
+      ? [
+          "AUTHOR GUIDANCE (trust this over guessing):",
+          authorHints.narratorName?.trim()
+            ? `First-person narrator / protagonist is “${authorHints.narratorName.trim()}”. Treat “I/me/my” as this person when enriching them.`
+            : "",
+          authorHints.authorNotes?.trim()
+            ? `Author notes: ${authorHints.authorNotes.trim()}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : "";
+
   try {
     const message = await client.messages.create({
       model: anthropicModel(),
@@ -79,8 +95,11 @@ export async function POST(request: Request) {
       system: `You are a literary character-bible editor for a novelist.
 The manuscript has ${chapterCount} chapter(s). Evidence may span the entire book.
 You MUST use material from every chapter present in the excerpts — never summarize only the opening.
+Read the prose the way a careful reader would: infer wants, needs, fears, flaws, strengths, appearance, and voice from what the character DOES and SAYS. Prefer concrete, text-grounded traits over vague labels.
 Ground every claim in the manuscript excerpts. Do not invent plot facts, ages, jobs, or relationships the text does not support.
 If evidence is thin, leave fields empty rather than guessing.
+CRITICAL — presence vs mention: Scenes labeled cast (present) or POV mean the character is on-stage. Scenes labeled “mentioned in prose only” mean they are talked about, remembered, or narrated — do NOT treat those as appearances, locations they visit, or scenes they are in. Prefer present scenes for identity, voice, psychology, and arc.
+Fill psychology.wants as their story goal; psychology.flaws/strengths as traits shown in scenes; voice from dialogue.
 Write in a spare, novelistic register — no marketing copy, no bullet-point AI tone.
 Prefer quoting or lightly adapting the author's language for voice.sample and shortBio.
 Arc.turningPoints should include turns from later chapters when they appear.`,
@@ -88,8 +107,9 @@ Arc.turningPoints should include turns from later chapters when they appear.`,
         {
           role: "user",
           content: `Enrich the wiki for this character using the FULL manuscript evidence (${chapterCount} chapters).
+Infer traits and goals from the text — do not leave psychology blank when the scenes clearly show desire, fear, or habit.
 
-Current snapshot:
+${hintsBlock ? `${hintsBlock}\n\n` : ""}Current snapshot:
 ${characterSnapshotForPrompt(character)}
 
 Manuscript evidence:

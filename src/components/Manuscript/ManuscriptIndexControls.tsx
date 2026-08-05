@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Cat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ClarenceButton } from "@/components/Characters/ClaudeDeepenButton";
 import {
   indexManuscriptWithClaude,
   useClaudeStatus,
+  type ManuscriptIndexProgress,
 } from "@/hooks/useClaudeEnrichment";
 import { useBook } from "@/providers/BookProvider";
 import { CLARENCE } from "@/lib/clarence";
@@ -19,12 +20,30 @@ import { cn } from "@/lib/utils";
 
 export type ManuscriptIndexApi = ReturnType<typeof useManuscriptIndex>;
 
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 export function useManuscriptIndex() {
   const { book, setManuscriptIndex } = useBook();
   const claude = useClaudeStatus();
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<"idle" | "reading" | "applying">("idle");
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ManuscriptIndexProgress | null>(
+    null,
+  );
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!busy || phase !== "reading" || startedAt == null) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [busy, phase, startedAt]);
 
   const fresh = useMemo(
     () => isManuscriptIndexFresh(book),
@@ -39,16 +58,41 @@ export function useManuscriptIndex() {
     return `Clarence read · ${formatIndexAge(idx.generatedAt)}`;
   }, [book.manuscriptIndex, fresh]);
 
+  const readingLabel = useMemo(() => {
+    if (!busy || phase !== "reading" || startedAt == null) return null;
+    const elapsed = formatElapsed(now - startedAt);
+    if (progress && progress.passCount > 0) {
+      if (progress.pass === 0) {
+        return `Starting · ${elapsed}`;
+      }
+      return `Pass ${progress.pass} of ${progress.passCount} · ${elapsed}`;
+    }
+    return `Reading · ${elapsed}`;
+  }, [busy, phase, startedAt, now, progress]);
+
   const ensureIndex = useCallback(
-    async (opts?: { force?: boolean }): Promise<ManuscriptIndexData> => {
-      if (!opts?.force && isManuscriptIndexFresh(book) && book.manuscriptIndex) {
-        return book.manuscriptIndex;
+    async (opts?: {
+      force?: boolean;
+      bookOverride?: typeof book;
+    }): Promise<ManuscriptIndexData> => {
+      const source = opts?.bookOverride ?? book;
+      if (
+        !opts?.force &&
+        isManuscriptIndexFresh(source) &&
+        source.manuscriptIndex
+      ) {
+        return source.manuscriptIndex;
       }
       setBusy(true);
       setPhase("reading");
       setError(null);
+      setProgress(null);
+      setStartedAt(Date.now());
+      setNow(Date.now());
       try {
-        const { index } = await indexManuscriptWithClaude(book);
+        const { index } = await indexManuscriptWithClaude(source, {
+          onProgress: (p) => setProgress(p),
+        });
         setManuscriptIndex(index);
         return index;
       } catch (e) {
@@ -59,6 +103,8 @@ export function useManuscriptIndex() {
       } finally {
         setBusy(false);
         setPhase("idle");
+        setProgress(null);
+        setStartedAt(null);
       }
     },
     [book, setManuscriptIndex],
@@ -77,6 +123,8 @@ export function useManuscriptIndex() {
     setError,
     fresh,
     statusLabel,
+    readingLabel,
+    progress,
     ensureIndex,
     reread,
     index: book.manuscriptIndex,
@@ -102,6 +150,7 @@ export function ManuscriptIndexControls({
     phase,
     error,
     statusLabel,
+    readingLabel,
     fresh,
     reread,
     index,
@@ -162,7 +211,7 @@ export function ManuscriptIndexControls({
         className="gap-1.5 rounded-full"
         disabled={running || claude?.configured === false}
         title={
-          index ? CLARENCE.rereadTitle : "Clarence will read before populating"
+          index ? CLARENCE.rereadTitle : CLARENCE.firstReadTitle
         }
         onClick={() => void handleReread()}
       >
@@ -175,16 +224,27 @@ export function ManuscriptIndexControls({
         />
         {busy && phase === "reading"
           ? CLARENCE.reading
-          : CLARENCE.rereadLabel}
+          : index
+            ? CLARENCE.rereadLabel
+            : CLARENCE.firstReadLabel}
       </Button>
       <span
         className={cn(
           "font-[family-name:var(--font-ui)] text-xs",
-          fresh ? "text-[var(--ink-muted)]" : "text-[#6B3A2A]",
+          busy && phase === "reading"
+            ? "text-[var(--ink)]"
+            : fresh
+              ? "text-[var(--ink-muted)]"
+              : "text-[#6B3A2A]",
         )}
       >
-        {statusLabel}
+        {readingLabel ?? statusLabel}
       </span>
+      {busy && phase === "reading" ? (
+        <span className="font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-faint)]">
+          Full novels often take a few minutes — keep Folio open.
+        </span>
+      ) : null}
       {message ? (
         <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
           {message}

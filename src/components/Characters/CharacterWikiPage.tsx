@@ -626,6 +626,11 @@ export function CharacterWikiPage({ characterId }: { characterId: string }) {
               <p className="mb-4 font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.18em] text-[var(--ink-faint)]">
                 Scene timeline
               </p>
+              <p className="mb-4 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                Present means POV or cast-tagged. Mentioned means their name
+                shows up in the prose only — often talked about, not in the
+                room.
+              </p>
               <AppearancesRail
                 appearances={appearances}
                 onOpenScene={focusScene}

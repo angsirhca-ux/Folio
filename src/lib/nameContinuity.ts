@@ -25,6 +25,122 @@ export function normalizeNameForms(
   return out;
 }
 
+const NAME_PARTICLES = new Set([
+  "de",
+  "da",
+  "di",
+  "du",
+  "del",
+  "della",
+  "van",
+  "von",
+  "der",
+  "den",
+  "la",
+  "le",
+  "of",
+  "the",
+  "st",
+  "st.",
+  "mc",
+  "mac",
+]);
+
+/**
+ * Full name + aliases, plus given/family tokens from multi-word names.
+ * “Lily Chen” → Lily Chen, Lily, Chen — so prose/POV “Lily” still counts.
+ */
+export function expandNameForms(
+  name: string,
+  aliases: string[] = [],
+): string[] {
+  const base = normalizeNameForms(name, aliases);
+  const extras: string[] = [];
+  for (const form of base) {
+    const parts = form.split(/[\s-]+/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length < 2) continue;
+    for (const part of parts) {
+      const clean = part.replace(/^[''‘’]+|[''‘’]+$/g, "");
+      if (clean.length < 3) continue;
+      if (NAME_PARTICLES.has(clean.toLowerCase())) continue;
+      extras.push(clean);
+    }
+  }
+  return normalizeNameForms(name, [...aliases, ...extras]);
+}
+
+/** Alias suggestions to store on the character card (tokens of a full name). */
+export function suggestNameAliases(name: string): string[] {
+  const full = name.trim();
+  if (!full) return [];
+  return expandNameForms(full, []).filter(
+    (f) => f.toLowerCase() !== full.toLowerCase(),
+  );
+}
+
+/**
+ * Name forms safe for prose scanning. Drops bare family-name tokens from
+ * multi-word names (“Chen” from “Lily Chen”) — those false-hit other people
+ * and inflate “mentioned in scene” noise. Given names and full forms stay.
+ */
+export function expandNameFormsForProse(
+  name: string,
+  aliases: string[] = [],
+): string[] {
+  const all = expandNameForms(name, aliases);
+  const parts = name
+    .trim()
+    .split(/[\s-]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return all;
+  const surname = parts[parts.length - 1]!.toLowerCase();
+  return all.filter((f) => f.toLowerCase() !== surname);
+}
+
+/**
+ * True when two labels likely name the same person/place
+ * (“Lily” ↔ “Lily Chen”, not “Lily” ↔ “Lilith”).
+ */
+export function namesLikelySamePerson(a: string, b: string): boolean {
+  const left = a.trim();
+  const right = b.trim();
+  if (!left || !right) return false;
+  if (left.toLowerCase() === right.toLowerCase()) return true;
+
+  const tokens = (s: string) =>
+    s
+      .toLowerCase()
+      .split(/[\s-]+/)
+      .map((t) => t.replace(/^[''‘’]+|[''‘’]+$/g, ""))
+      .filter((t) => t.length >= 3 && !NAME_PARTICLES.has(t));
+
+  const aTokens = tokens(left);
+  const bTokens = tokens(right);
+  if (!aTokens.length || !bTokens.length) return false;
+
+  // Single given/family name contained in the longer label
+  if (aTokens.length === 1 && bTokens.includes(aTokens[0]!)) return true;
+  if (bTokens.length === 1 && aTokens.includes(bTokens[0]!)) return true;
+
+  // Every distinctive token of the shorter label appears in the longer
+  const [shorter, longer] =
+    aTokens.length <= bTokens.length ? [aTokens, bTokens] : [bTokens, aTokens];
+  return shorter.every((t) => longer.includes(t));
+}
+
+/** Prefer the more complete label as the canonical card name. */
+export function preferCanonicalName(a: string, b: string): string {
+  const left = a.trim();
+  const right = b.trim();
+  if (!left) return right;
+  if (!right) return left;
+  const lw = left.split(/[\s-]+/).filter(Boolean).length;
+  const rw = right.split(/[\s-]+/).filter(Boolean).length;
+  if (lw !== rw) return lw > rw ? left : right;
+  return left.length >= right.length ? left : right;
+}
+
 export function nameMentionedInText(text: string, name: string): boolean {
   const n = name.trim();
   if (!n || n.length < 2) return false;
@@ -301,7 +417,7 @@ export function buildNameContinuityReport(
     proseLimit?: number;
   },
 ): NameContinuityReport {
-  const forms = normalizeNameForms(opts.name, opts.aliases ?? []);
+  const forms = expandNameForms(opts.name, opts.aliases ?? []);
   const proseHits = findProseNameHits(book.chapters, forms, {
     limit: opts.proseLimit ?? 80,
   });

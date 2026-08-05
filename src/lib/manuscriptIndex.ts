@@ -25,6 +25,11 @@ import {
   type ChapterWindow,
 } from "./manuscriptContext";
 import { PLOT_THREAD_PALETTE } from "./plotThreads";
+import {
+  namesLikelySamePerson,
+  preferCanonicalName,
+  suggestNameAliases,
+} from "./nameContinuity";
 
 /** @deprecated Prefer ManuscriptIndexData from types — alias for local code. */
 export type ManuscriptIndex = ManuscriptIndexData;
@@ -44,16 +49,26 @@ export const MANUSCRIPT_INDEX_TOOL_NAME = "save_manuscript_index";
 export const manuscriptIndexTool = {
   name: MANUSCRIPT_INDEX_TOOL_NAME,
   description:
-    "Extract bible seeds from this manuscript window: cast, places, research topics, encyclopedia canon, world-history chronicle events, and plot threads with scene assignments.",
+    "Extract bible seeds from this manuscript window: cast who are PRESENT on-stage, places, research topics, encyclopedia canon, world-history chronicle events, and plot threads with scene assignments. Do not invent duplicate people under slight name variants.",
   input_schema: {
     type: "object" as const,
     properties: {
       characters: {
         type: "array",
+        description:
+          "People. Prefer ONE entry per person using their fullest name. Set presence carefully.",
         items: {
           type: "object",
           properties: {
-            name: { type: "string" },
+            name: {
+              type: "string",
+              description: "Fullest stable name for this person (e.g. Lily Chen, not Lily).",
+            },
+            aliases: {
+              type: "array",
+              items: { type: "string" },
+              description: "Other forms used in prose (Lily, Chen, Ms. Chen).",
+            },
             role: {
               type: "string",
               enum: [
@@ -67,8 +82,14 @@ export const manuscriptIndexTool = {
             },
             shortBio: { type: "string" },
             evidence: { type: "string" },
+            presence: {
+              type: "string",
+              enum: ["present", "mentioned"],
+              description:
+                "present = on-stage in this window (acts, speaks, occupies the scene). mentioned = only spoken about, remembered, or narrated — NOT physically in the scene.",
+            },
           },
-          required: ["name"],
+          required: ["name", "presence"],
         },
       },
       locations: {
@@ -303,29 +324,49 @@ export function mergeManuscriptIndexSlice(
   part: ManuscriptIndexSlice,
 ): ManuscriptIndex {
   const characters = [...acc.characters];
-  const charKeys = new Set(characters.map((c) => normKey(c.name)));
   for (const c of part.characters ?? []) {
     const name = c.name?.trim() ?? "";
     if (name.length < 2) continue;
-    const key = normKey(name);
-    if (charKeys.has(key)) {
-      const i = characters.findIndex((x) => normKey(x.name) === key);
-      if (i >= 0) {
-        characters[i] = {
-          ...characters[i],
-          role: c.role ?? characters[i].role,
-          shortBio:
-            (c.shortBio?.trim().length ?? 0) >
-            (characters[i].shortBio?.trim().length ?? 0)
-              ? c.shortBio
-              : characters[i].shortBio,
-          evidence: c.evidence || characters[i].evidence,
-        };
-      }
+    // Skip pure "mentioned" seeds unless we already track the person —
+    // cast populate is for people who are on-stage.
+    const presence = c.presence ?? "present";
+    const i = characters.findIndex((x) => namesLikelySamePerson(x.name, name));
+    if (i >= 0) {
+      const prev = characters[i]!;
+      const canonical = preferCanonicalName(prev.name, name);
+      const aliasSet = new Set(
+        [...(prev.aliases ?? []), ...(c.aliases ?? []), name, prev.name]
+          .map((a) => a.trim())
+          .filter((a) => a && a.toLowerCase() !== canonical.toLowerCase()),
+      );
+      for (const tip of suggestNameAliases(canonical)) aliasSet.add(tip);
+      characters[i] = {
+        ...prev,
+        name: canonical,
+        aliases: [...aliasSet],
+        role: c.role && c.role !== "unspecified" ? c.role : prev.role,
+        shortBio:
+          (c.shortBio?.trim().length ?? 0) > (prev.shortBio?.trim().length ?? 0)
+            ? c.shortBio
+            : prev.shortBio,
+        evidence: c.evidence || prev.evidence,
+        // Upgrade mentioned → present if any pass saw them on-stage
+        presence:
+          prev.presence === "present" || presence === "present"
+            ? "present"
+            : "mentioned",
+      };
       continue;
     }
-    charKeys.add(key);
-    characters.push({ ...c, name });
+    if (presence === "mentioned") continue;
+    const aliases = [
+      ...new Set(
+        [...(c.aliases ?? []), ...suggestNameAliases(name)]
+          .map((a) => a.trim())
+          .filter((a) => a && a.toLowerCase() !== name.toLowerCase()),
+      ),
+    ];
+    characters.push({ ...c, name, aliases, presence: "present" });
   }
 
   const locations = [...acc.locations];
@@ -553,6 +594,7 @@ export function buildManuscriptIndexContext(
     | "encyclopedia"
     | "chronicle"
     | "plotThreads"
+    | "clarenceContext"
   >,
   window: ChapterWindow,
   prior: ManuscriptIndex | null,
@@ -599,6 +641,15 @@ export function buildManuscriptIndexContext(
     `Pass ${passMeta.pass}/${passMeta.passCount} — chapters ${window.fromChapter + 1}–${window.toChapter} of ${chapters.length}.`,
     `Read this window FULLY. Extract only what appears in these chapters (plus continuity with prior finds).`,
     `Do not invent. Do not rewrite manuscript prose.`,
+    `CAST RULES: One entry per person — reuse the fullest name from prior passes / bible (Lily Chen, not a second card for Lily).`,
+    `presence=present only if they are ON-STAGE in this window (act, speak, occupy the scene). If they are only talked about, remembered, or narrated, use presence=mentioned (or omit them).`,
+    `Do not invent duplicate people from nicknames or surname-only variants.`,
+    book.clarenceContext?.narratorName?.trim()
+      ? `AUTHOR: First-person narrator / protagonist is “${book.clarenceContext.narratorName.trim()}”. Map “I/me/my” to that person; mark them protagonist and presence=present in first-person scenes.`
+      : "",
+    book.clarenceContext?.authorNotes?.trim()
+      ? `AUTHOR NOTES: ${book.clarenceContext.authorNotes.trim()}`
+      : "",
     `Chronicle = world lore history (ages, wars, founding) — NOT present plot beats.`,
     `plotAssignments must use exact sceneId values from the blocks below.`,
     `Plot thread colors only from: ${PLOT_THREAD_PALETTE.join(", ")}.`,

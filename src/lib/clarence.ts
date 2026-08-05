@@ -13,6 +13,8 @@ export const CLARENCE = {
     "Clarence builds a fifteen-song soundtrack from his manuscript reading",
   rereadLabel: "Ask Clarence to reread",
   rereadTitle: "Force a fresh full manuscript reading",
+  firstReadLabel: "Have Clarence read",
+  firstReadTitle: "Clarence reads the manuscript so populate can seed empty shelves",
   reading: "Clarence is reading…",
   readingFull: "Clarence is reading the manuscript…",
   applying: "Clarence is applying…",

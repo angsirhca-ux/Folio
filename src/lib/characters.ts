@@ -10,6 +10,15 @@ import type {
 import { createId } from "./utils";
 import { getSceneHtmlParts } from "./manuscriptScenes";
 import { normalizeContinuityNotes } from "./continuity";
+import {
+  expandNameForms,
+  expandNameFormsForProse,
+  nameMentionedInText,
+  namesLikelySamePerson,
+  preferCanonicalName,
+  scenePlainText,
+  suggestNameAliases,
+} from "./nameContinuity";
 
 export function emptyIdentity() {
   return { age: "", occupation: "", appearance: "", distinguishing: "" };
@@ -57,6 +66,59 @@ export function createCharacter(
     createdAt: partial.createdAt ?? now,
     updatedAt: partial.updatedAt ?? now,
   };
+}
+
+/**
+ * Collapse duplicate cast cards (“Lily” + “Lily Chen”) into one survivor.
+ * Keeps the fuller name and richer sheet; returns survivors + ids to delete.
+ */
+export function collapseDuplicateCharacters(characters: Character[]): {
+  kept: Character[];
+  removedIds: string[];
+} {
+  const kept: Character[] = [];
+  const removedIds: string[] = [];
+
+  for (const c of characters) {
+    const i = kept.findIndex((k) => namesLikelySamePerson(k.name, c.name));
+    if (i < 0) {
+      kept.push(c);
+      continue;
+    }
+    const prev = kept[i]!;
+    const canonical = preferCanonicalName(prev.name, c.name);
+    const richer =
+      characterCompleteness(c) > characterCompleteness(prev) ? c : prev;
+    const thinner = richer.id === c.id ? prev : c;
+    const aliasSet = new Set(
+      [
+        ...(prev.aliases ?? []),
+        ...(c.aliases ?? []),
+        prev.name,
+        c.name,
+        ...suggestNameAliases(canonical),
+      ]
+        .map((a) => a.trim())
+        .filter((a) => a && a.toLowerCase() !== canonical.toLowerCase()),
+    );
+    kept[i] = {
+      ...richer,
+      name: canonical,
+      aliases: [...aliasSet],
+      role:
+        richer.role !== "unspecified"
+          ? richer.role
+          : thinner.role !== "unspecified"
+            ? thinner.role
+            : richer.role,
+      shortBio: richer.shortBio?.trim() || thinner.shortBio || "",
+      wiki: richer.wiki?.trim() || thinner.wiki || "",
+      updatedAt: Date.now(),
+    };
+    removedIds.push(thinner.id);
+  }
+
+  return { kept, removedIds };
 }
 
 export function createRelationship(
@@ -147,8 +209,11 @@ export function namesMatch(a: string, b: string): boolean {
 
 export function characterMatchesName(c: Character, name: string): boolean {
   if (!name.trim()) return false;
-  if (namesMatch(c.name, name)) return true;
-  return c.aliases.some((alias) => namesMatch(alias, name));
+  const forms = expandNameForms(c.name, c.aliases ?? []);
+  if (forms.some((f) => namesMatch(f, name))) return true;
+  // POV/cast tag may be a given name while the card holds a full name (or reverse).
+  const tagForms = expandNameForms(name.trim(), []);
+  return forms.some((f) => tagForms.some((t) => namesMatch(f, t)));
 }
 
 export function findCharacterByName(
@@ -169,6 +234,11 @@ export interface CharacterAppearance {
   inCast: boolean;
   /** Found in scene prose (name or alias) without a cast/POV tag. */
   viaProse: boolean;
+  /**
+   * present = on-page (POV or cast tag).
+   * mentioned = name appears in prose only (talked about / narrated) — not proof they are in the scene.
+   */
+  presence: "present" | "mentioned";
   /** Which form matched in prose, when viaProse. */
   matchedAs?: string;
 }
@@ -178,10 +248,11 @@ export function characterAppearances(
   chapters: Chapter[],
   character: Character,
 ): CharacterAppearance[] {
-  const forms = [character.name, ...(character.aliases ?? [])]
-    .map((n) => n.trim())
-    .filter((n) => n.length >= 2)
-    .sort((a, b) => b.length - a.length);
+  // POV/cast via characterMatchesName. Prose: no bare surnames.
+  const proseForms = expandNameFormsForProse(
+    character.name,
+    character.aliases ?? [],
+  );
   const out: CharacterAppearance[] = [];
 
   chapters.forEach((chapter, chapterIndex) => {
@@ -193,9 +264,9 @@ export function characterAppearances(
       );
       let viaProse = false;
       let matchedAs: string | undefined;
-      if (!asPov && !inCast && forms.length) {
+      if (!asPov && !inCast && proseForms.length) {
         const prose = scenePlainText(parts[sceneIndex] ?? "");
-        for (const form of forms) {
+        for (const form of proseForms) {
           if (nameMentionedInText(prose, form)) {
             viaProse = true;
             matchedAs = form;
@@ -204,6 +275,7 @@ export function characterAppearances(
         }
       }
       if (asPov || inCast || viaProse) {
+        const present = asPov || inCast;
         out.push({
           chapterId: chapter.id,
           chapterTitle: chapter.title,
@@ -213,12 +285,23 @@ export function characterAppearances(
           asPov,
           inCast,
           viaProse,
+          presence: present ? "present" : "mentioned",
           matchedAs,
         });
       }
     });
   });
   return out;
+}
+
+/** On-page only — POV or cast tag. Excludes “talked about” prose hits. */
+export function characterPresentAppearances(
+  chapters: Chapter[],
+  character: Character,
+): CharacterAppearance[] {
+  return characterAppearances(chapters, character).filter(
+    (a) => a.presence === "present",
+  );
 }
 
 /** Unique names mentioned on scenes that have no wiki entry yet. */
@@ -324,34 +407,6 @@ export function renameCharacterInChapters(
 
 const AUTO_REL_PREFIX = "Shared scenes";
 
-function scenePlainText(html: string): string {
-  return html
-    .replace(/<h1[^>]*>[\s\S]*?<\/h1>/gi, " ")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&mdash;/g, "—")
-    .replace(/&ndash;/g, "–")
-    .replace(/&hellip;/g, "…")
-    .replace(/&lsquo;/g, "‘")
-    .replace(/&rsquo;/g, "’")
-    .replace(/&ldquo;/g, "“")
-    .replace(/&rdquo;/g, "”")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n+/g, "\n")
-    .trim();
-}
-
-function nameMentionedInText(text: string, name: string): boolean {
-  const n = name.trim();
-  if (!n || n.length < 2) return false;
-  const escaped = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`(?:^|[^\\p{L}])${escaped}(?:[^\\p{L}]|$)`, "iu");
-  return re.test(text);
-}
-
 function collectTaggedNames(chapters: Chapter[]): string[] {
   const names = new Set<string>();
   for (const ch of chapters) {
@@ -417,34 +472,52 @@ function buildStoryDigest(
   appearances: CharacterAppearance[],
   coNames: { name: string; count: number }[],
 ): string {
-  if (appearances.length === 0) {
-    return "Not yet on the page — tagged in the cast but no matching scenes.";
+  const present = appearances.filter((a) => a.presence === "present");
+  const mentioned = appearances.filter((a) => a.presence === "mentioned");
+  if (present.length === 0 && mentioned.length === 0) {
+    return "Not yet on the page — tag them as POV or cast on scenes.";
   }
 
-  const povCount = appearances.filter((a) => a.asPov).length;
+  const povCount = present.filter((a) => a.asPov).length;
   const lines: string[] = [
-    `Appears in ${appearances.length} scene${appearances.length === 1 ? "" : "s"}${
-      povCount ? ` (${povCount} as POV)` : ""
-    }.`,
+    present.length
+      ? `Present in ${present.length} scene${present.length === 1 ? "" : "s"}${
+          povCount ? ` (${povCount} as POV)` : ""
+        }.`
+      : "Not cast or POV on any scene yet.",
+    mentioned.length
+      ? `Mentioned (talked about) in ${mentioned.length} other scene${mentioned.length === 1 ? "" : "s"}.`
+      : "",
     "",
-  ];
+  ].filter((l) => l !== "");
 
-  for (const a of appearances) {
+  for (const a of present) {
     const bit = a.scene.synopsis?.trim() || a.scene.title;
     const loc = a.scene.location?.trim();
     lines.push(
-      `• ${a.chapterTitle} / ${a.scene.title}${a.asPov ? " (POV)" : ""}${
-        a.viaProse ? " (prose)" : ""
-      }${loc ? ` — ${loc}` : ""}`,
+      `• ${a.chapterTitle} / ${a.scene.title}${a.asPov ? " (POV)" : " (cast)"}${
+        loc ? ` — ${loc}` : ""
+      }`,
     );
     if (bit && bit !== a.scene.title) {
       lines.push(`  ${bit}`);
     }
   }
 
+  if (mentioned.length) {
+    lines.push("", "Mentioned only:");
+    for (const a of mentioned.slice(0, 12)) {
+      lines.push(
+        `• ${a.chapterTitle} / ${a.scene.title}${
+          a.matchedAs ? ` (as “${a.matchedAs}”)` : ""
+        }`,
+      );
+    }
+  }
+
   const locations = [
     ...new Set(
-      appearances
+      present
         .map((a) => a.scene.location?.trim())
         .filter((v): v is string => Boolean(v)),
     ),

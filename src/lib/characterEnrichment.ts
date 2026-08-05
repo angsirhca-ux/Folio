@@ -15,6 +15,7 @@ import {
   MANUSCRIPT_CONTEXT_BUDGET,
   packBalancedExcerpts,
 } from "@/lib/manuscriptContext";
+import { expandNameFormsForProse, nameMentionedInText } from "@/lib/nameContinuity";
 
 const AUTO_WIKI_PREFIX = "Compiled from the manuscript";
 
@@ -41,6 +42,13 @@ export type DiscoveredCharacter = {
   role?: CharacterRole;
   shortBio?: string;
   evidence?: string;
+  /** Other forms of the same person (Lily for Lily Chen). */
+  aliases?: string[];
+  /**
+   * present = on-stage in this window (acts, speaks, is there).
+   * mentioned = only talked about / remembered / narrated — do not treat as cast presence.
+   */
+  presence?: "present" | "mentioned";
 };
 
 export type EnrichApplyMode = "fill-empty" | "deepen";
@@ -86,12 +94,7 @@ function scenePlain(html: string): string {
 }
 
 function nameInProse(prose: string, names: string[]): boolean {
-  const lower = prose.toLowerCase();
-  return names.some((n) => {
-    const t = n.trim();
-    if (t.length < 2) return false;
-    return lower.includes(t.toLowerCase());
-  });
+  return names.some((n) => nameMentionedInText(prose, n));
 }
 
 type EvidenceScene = {
@@ -113,7 +116,7 @@ function collectCharacterEvidence(
   book: Pick<Book, "chapters">,
   character: Character,
 ): EvidenceScene[] {
-  const names = [character.name, ...character.aliases];
+  const names = expandNameFormsForProse(character.name, character.aliases);
   const tagged = characterAppearances(book.chapters, character);
   const byScene = new Map<string, EvidenceScene>();
 
@@ -171,8 +174,8 @@ function collectCharacterEvidence(
 function evidenceToBlock(e: EvidenceScene): string {
   const flags = [
     e.asPov ? "POV" : null,
-    e.tagged ? "cast" : null,
-    e.proseMatch && !e.tagged ? "named in prose" : null,
+    e.tagged ? "cast (present)" : null,
+    e.proseMatch && !e.tagged ? "mentioned in prose only — may not be present" : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -199,6 +202,8 @@ export function buildCharacterManuscriptContext(
 ): string {
   const evidence = collectCharacterEvidence(book, character);
   const chapterCount = book.chapters.length;
+  const present = evidence.filter((e) => e.asPov || e.tagged);
+  const mentioned = evidence.filter((e) => !e.asPov && !e.tagged && e.proseMatch);
 
   const preamble = [
     `Manuscript: ${book.title || "Untitled"}`,
@@ -213,21 +218,25 @@ export function buildCharacterManuscriptContext(
       ? `Author wiki notes:\n${character.wiki}`
       : "",
     "",
+    `On-stage (POV/cast): ${present.length} scene(s). Mentions only (talked about): ${mentioned.length}.`,
+    `Use ON-STAGE scenes for where they are, what they do, and voice. Mentions-only scenes are gossip/memory — do not treat as cast presence.`,
     evidence.length === 0
       ? "No tagged or named appearances found. Full chapter excerpts follow when available."
-      : `Evidence scenes: ${evidence.length} across ${new Set(evidence.map((e) => e.chapterIndex)).size} chapter(s). Use ALL chapters — do not stop after chapter 1.`,
+      : `Evidence scenes: ${evidence.length} across ${new Set(evidence.map((e) => e.chapterIndex)).size} chapter(s). Prefer present scenes; skim mentions for relationships only.`,
     "",
   ]
     .filter((line) => line !== "")
     .join("\n");
 
   const byChapter: string[][] = book.chapters.map(() => []);
-  for (const e of evidence) {
+  // Present first within each chapter grouping via sort of evidence order
+  const ordered = [...present, ...mentioned];
+  for (const e of ordered) {
     byChapter[e.chapterIndex]?.push(evidenceToBlock(e));
   }
 
-  // Sparse evidence: still send the whole manuscript (clipped) so later chapters are visible
-  if (evidence.length < 3) {
+  // Sparse on-stage evidence: send clipped context from other scenes, clearly unlabeled as non-presence
+  if (present.length < 3) {
     book.chapters.forEach((chapter, chapterIndex) => {
       const htmlParts = getSceneHtmlParts(chapter.content);
       (chapter.scenes ?? []).forEach((scene, sceneIndex) => {
@@ -235,12 +244,12 @@ export function buildCharacterManuscriptContext(
         const prose = scenePlain(htmlParts[sceneIndex] ?? "");
         if (!prose) return;
         const clipped =
-          prose.length > 1400 ? `${prose.slice(0, 1400).trim()}…` : prose;
+          prose.length > 900 ? `${prose.slice(0, 900).trim()}…` : prose;
         byChapter[chapterIndex].push(
           [
             `---`,
             `Chapter ${chapterIndex + 1}: ${chapter.title}`,
-            `Scene: ${scene.title}`,
+            `Scene: ${scene.title} [context only — ${character.name} not named here]`,
             `POV: ${scene.pov || "—"}`,
             `Cast: ${(scene.characters ?? []).join(", ") || "—"}`,
             `Prose:`,
@@ -486,7 +495,7 @@ export const ENRICH_TOOL_NAME = "save_character_wiki";
 export const enrichCharacterTool = {
   name: ENRICH_TOOL_NAME,
   description:
-    "Save an enriched character wiki grounded in the FULL manuscript evidence (all chapters). Leave fields empty when the text does not support them.",
+    "Save an enriched character wiki grounded in the FULL manuscript evidence (all chapters). Infer traits, goals, and voice from what the character does and says — leave fields empty when the text does not support them.",
   input_schema: {
     type: "object" as const,
     properties: {
@@ -503,39 +512,84 @@ export const enrichCharacterTool = {
       },
       shortBio: {
         type: "string",
-        description: "One literary sentence for the cast list.",
+        description:
+          "One literary sentence for the cast list — who they are on the page, not a résumé.",
       },
       wiki: {
         type: "string",
         description:
-          "2–5 short paragraphs covering the character across the WHOLE manuscript, not only early chapters.",
+          "2–5 short paragraphs covering the character across the WHOLE manuscript, not only early chapters. Ground in actions and dialogue.",
       },
       aliases: { type: "array", items: { type: "string" } },
       tags: { type: "array", items: { type: "string" } },
       identity: {
         type: "object",
         properties: {
-          age: { type: "string" },
-          occupation: { type: "string" },
-          appearance: { type: "string" },
-          distinguishing: { type: "string" },
+          age: {
+            type: "string",
+            description: "Only if stated or strongly implied in the text.",
+          },
+          occupation: {
+            type: "string",
+            description: "Job/role as shown in the manuscript.",
+          },
+          appearance: {
+            type: "string",
+            description:
+              "Physical traits the prose actually describes — hair, build, clothes, bearing.",
+          },
+          distinguishing: {
+            type: "string",
+            description:
+              "Memorable details the text emphasizes (scar, accent, habit of dress).",
+          },
         },
       },
       psychology: {
         type: "object",
+        description:
+          "Read goals and traits from behavior, dialogue, and interiority — do not invent a therapy profile.",
         properties: {
-          wants: { type: "string" },
-          needs: { type: "string" },
-          fears: { type: "string" },
-          flaws: { type: "string" },
-          strengths: { type: "string" },
+          wants: {
+            type: "string",
+            description:
+              "External goal / what they are chasing in the story (plot desire). Cite what the text shows.",
+          },
+          needs: {
+            type: "string",
+            description:
+              "Deeper need under the want, only if the manuscript supports it (growth toward…). ",
+          },
+          fears: {
+            type: "string",
+            description:
+              "What they avoid or dread, as evidenced by choices or stated fear.",
+          },
+          flaws: {
+            type: "string",
+            description:
+              "Character flaws / traits that cause trouble — shown in scenes, not labels.",
+          },
+          strengths: {
+            type: "string",
+            description:
+              "Competencies and virtues the text demonstrates (not generic praise).",
+          },
         },
       },
       voice: {
         type: "object",
         properties: {
-          speechNotes: { type: "string" },
-          mannerisms: { type: "string" },
+          speechNotes: {
+            type: "string",
+            description:
+              "How they talk — diction, rhythm, register — from quoted or paraphrased dialogue.",
+          },
+          mannerisms: {
+            type: "string",
+            description:
+              "Physical/behavioral ticks the prose notes (gestures, habits).",
+          },
           sample: {
             type: "string",
             description:
@@ -546,15 +600,26 @@ export const enrichCharacterTool = {
       arc: {
         type: "object",
         properties: {
-          startingPoint: { type: "string" },
+          startingPoint: {
+            type: "string",
+            description: "Where they begin — stance, wound, or situation.",
+          },
           turningPoints: {
             type: "string",
             description: "Major turns from early AND later chapters.",
           },
-          endingPoint: { type: "string" },
+          endingPoint: {
+            type: "string",
+            description:
+              "Where they land by the latest evidence (or leave empty if unfinished).",
+          },
         },
       },
-      secrets: { type: "string" },
+      secrets: {
+        type: "string",
+        description:
+          "Hidden facts the manuscript reveals to the reader or keeps from other characters.",
+      },
       relationships: {
         type: "array",
         items: {

@@ -37,6 +37,10 @@ import {
   type FolioBackupPayload,
 } from "@/lib/backup";
 import {
+  applyClarenceAskAnswers,
+  type ClarenceAskAnswers,
+} from "@/lib/clarenceAsk";
+import {
   acknowledgeRemote,
   beginDropboxAuth,
   buildDropboxPayload,
@@ -568,6 +572,10 @@ interface BookContextValue {
   applyPlotThreadsFromClaude: (payload: PlotThreadDiscoverPayload) => void;
   applyChronicleFromClaude: (payload: ChronicleDiscoverPayload) => void;
   setManuscriptIndex: (index: ManuscriptIndexData | undefined) => void;
+  /** Persist narrator / notes from Clarence’s pre-populate ask dialog. */
+  applyClarenceAsk: (
+    answers: ClarenceAskAnswers,
+  ) => import("@/lib/clarenceAsk").ApplyNarratorResult;
   /** Jump manuscript editor to a ***–separated scene within a chapter. */
   focusScene: (chapterId: string, sceneIndex: number) => void;
   sceneFocus: { chapterId: string; sceneIndex: number; token: number } | null;
@@ -2909,6 +2917,20 @@ export function BookProvider({ children }: { children: ReactNode }) {
           manuscriptIndex: index,
           updatedAt: Date.now(),
         })),
+      applyClarenceAsk: (answers) => {
+        let result!: ReturnType<typeof applyClarenceAskAnswers>;
+        updateBook((b) => {
+          result = applyClarenceAskAnswers(b, answers);
+          return {
+            ...b,
+            chapters: result.chapters,
+            characters: result.characters,
+            clarenceContext: result.clarenceContext,
+            updatedAt: Date.now(),
+          };
+        });
+        return result;
+      },
       focusScene,
       sceneFocus,
       dropboxStatus,

@@ -10,7 +10,6 @@ import {
   type ManuscriptIndex,
   type ManuscriptIndexSlice,
 } from "@/lib/manuscriptIndex";
-import { runManuscriptPasses } from "@/lib/manuscriptPasses";
 import {
   anthropicModel,
   extractToolInput,
@@ -33,6 +32,7 @@ type IndexBody = {
     | "encyclopedia"
     | "chronicle"
     | "plotThreads"
+    | "clarenceContext"
   >;
 };
 
@@ -52,7 +52,17 @@ function normalizeSlice(raw: ManuscriptIndexSlice | null): ManuscriptIndexSlice 
   if (!raw) return {};
   return {
     characters: (raw.characters ?? [])
-      .map((c) => ({ ...c, name: c.name?.trim() ?? "" }))
+      .map((c) => ({
+        ...c,
+        name: c.name?.trim() ?? "",
+        aliases: (c.aliases ?? [])
+          .map((a) => a.trim())
+          .filter((a) => a.length > 1),
+        presence:
+          c.presence === "mentioned" || c.presence === "present"
+            ? c.presence
+            : ("present" as const),
+      }))
       .filter((c) => c.name.length > 1),
     locations: (raw.locations ?? [])
       .map((l) => ({ ...l, name: l.name?.trim() ?? "" }))
@@ -90,6 +100,10 @@ export async function GET() {
   });
 }
 
+/**
+ * Streams NDJSON progress so the UI can show pass N of M + elapsed time.
+ * Lines: start → pass* → done | error
+ */
 export async function POST(request: Request) {
   const client = getAnthropicClient();
   if (!client) {
@@ -137,80 +151,106 @@ export async function POST(request: Request) {
     color: t.color,
   }));
   const hasLockedThreads = seededThreads.length > 0;
+  const passCount = Math.min(windows.length, 12);
+  const runWindows = windows.slice(0, passCount);
 
-  try {
-    const { result, passCount } = await runManuscriptPasses<ManuscriptIndex>({
-      windows,
-      empty: emptyManuscriptIndex(sourceHash, {
-        plotThreads: seededThreads,
-      }),
-      merge: (acc, part) => mergeManuscriptIndexSlice(acc, part),
-      runPass: async (window, meta) => {
-        const context = buildManuscriptIndexContext(
-          bookCtx,
-          window,
-          meta.pass > 1 ? meta.prior : null,
-          { pass: meta.pass, passCount: meta.passCount },
-        );
-        if (context.length < 120) {
-          return emptyManuscriptIndex(sourceHash, {
-            plotThreads: seededThreads,
-          });
-        }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (payload: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(`${JSON.stringify(payload)}\n`));
+      };
 
-        const message = await client.messages.create({
-          model: anthropicModel(),
-          max_tokens: 8192,
-          tools: [manuscriptIndexTool],
-          tool_choice: {
-            type: "tool",
-            name: MANUSCRIPT_INDEX_TOOL_NAME,
-          },
-          system: `You are indexing a novelist's manuscript into a world bible reading.
+      try {
+        send({
+          type: "start",
+          pass: 0,
+          passCount,
+          chapters: chapters.length,
+        });
+
+        let acc = emptyManuscriptIndex(sourceHash, {
+          plotThreads: seededThreads,
+        });
+
+        for (let i = 0; i < runWindows.length; i++) {
+          const pass = i + 1;
+          send({ type: "pass", pass, passCount, chapters: chapters.length });
+
+          const window = runWindows[i]!;
+          const context = buildManuscriptIndexContext(
+            bookCtx,
+            window,
+            pass > 1 ? acc : null,
+            { pass, passCount },
+          );
+
+          if (context.length < 120) {
+            continue;
+          }
+
+          const message = await client.messages.create({
+            model: anthropicModel(),
+            max_tokens: 8192,
+            tools: [manuscriptIndexTool],
+            tool_choice: {
+              type: "tool",
+              name: MANUSCRIPT_INDEX_TOOL_NAME,
+            },
+            system: `You are indexing a novelist's manuscript into a world bible reading.
 Extract ONLY what is evidenced in this chapter window (plus continuity with prior finds listed in the prompt).
 Return cast names, places, outside-research topics, in-world encyclopedia seeds, world-history chronicle events (lore — not plot beats), and plot threads with exact sceneId assignments.
 Never invent unsupported entities. Never rewrite manuscript prose.
+CAST: one person = one entry. Reuse the fullest name from prior finds / bible. Add nicknames under aliases — do not create a second card for “Lily” if “Lily Chen” already exists.
+presence=present only when they are on-stage (act, speak, occupy the scene). If they are only talked about, remembered, or narrated, use presence=mentioned.
+If AUTHOR guidance names a first-person narrator, treat “I/me/my” as that person and mark them protagonist / present in those scenes.
 ${
   hasLockedThreads
     ? "Plot threads are LOCKED to the names listed in the prompt — use those exact names only; do not invent new tracks; assign scenes onto them."
     : "Reuse plot thread names from prior passes when the same strand continues."
 }`,
-          messages: [
-            {
-              role: "user",
-              content: `Index manuscript window for “${body.book.title || "Untitled"}”.\n\n${context}`,
-            },
-          ],
+            messages: [
+              {
+                role: "user",
+                content: `Index manuscript window for “${body.book.title || "Untitled"}”.\n\n${context}`,
+              },
+            ],
+          });
+
+          const raw = extractToolInput<ManuscriptIndexSlice>(
+            message,
+            MANUSCRIPT_INDEX_TOOL_NAME,
+          );
+          const slice = normalizeSlice(raw);
+          acc = mergeManuscriptIndexSlice(acc, slice);
+        }
+
+        const index: ManuscriptIndex = {
+          ...acc,
+          generatedAt: Date.now(),
+          sourceHash,
+        };
+
+        send({
+          type: "done",
+          index,
+          passes: passCount,
+          chapters: chapters.length,
         });
+      } catch (err) {
+        const detail =
+          err instanceof Error ? err.message : "Unknown Anthropic error";
+        send({ type: "error", error: detail });
+      } finally {
+        controller.close();
+      }
+    },
+  });
 
-        const raw = extractToolInput<ManuscriptIndexSlice>(
-          message,
-          MANUSCRIPT_INDEX_TOOL_NAME,
-        );
-        const slice = normalizeSlice(raw);
-        return mergeManuscriptIndexSlice(
-          emptyManuscriptIndex(sourceHash, {
-            plotThreads: seededThreads,
-          }),
-          slice,
-        );
-      },
-    });
-
-    const index: ManuscriptIndex = {
-      ...result,
-      generatedAt: Date.now(),
-      sourceHash,
-    };
-
-    return NextResponse.json({
-      index,
-      passes: passCount,
-      chapters: chapters.length,
-    });
-  } catch (err) {
-    const detail =
-      err instanceof Error ? err.message : "Unknown Anthropic error";
-    return NextResponse.json({ error: detail }, { status: 502 });
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
 }

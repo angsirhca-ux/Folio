@@ -42,6 +42,7 @@ function bookPayload(book: Book) {
     encyclopedia: book.encyclopedia ?? [],
     encyclopediaStacks: book.encyclopediaStacks ?? [],
     plotThreads: book.plotThreads ?? [],
+    clarenceContext: book.clarenceContext,
   };
 }
 
@@ -558,8 +559,17 @@ export function useEncyclopediaDeepen(
   return { status, busy, error, doneAt, deepen };
 }
 
+export type ManuscriptIndexProgress = {
+  pass: number;
+  passCount: number;
+  chapters?: number;
+};
+
 export async function indexManuscriptWithClaude(
   book: Book,
+  opts?: {
+    onProgress?: (progress: ManuscriptIndexProgress) => void;
+  },
 ): Promise<{ index: import("@/lib/types").ManuscriptIndexData; passes: number }> {
   let res: Response;
   try {
@@ -576,6 +586,7 @@ export async function indexManuscriptWithClaude(
           encyclopedia: book.encyclopedia ?? [],
           chronicle: book.chronicle ?? [],
           plotThreads: book.plotThreads ?? [],
+          clarenceContext: book.clarenceContext,
         },
       }),
     });
@@ -587,13 +598,74 @@ export async function indexManuscriptWithClaude(
         : "Network error talking to Clarence — check your connection and try again.",
     );
   }
-  const data = (await res.json()) as {
+
+  // Non-stream error responses (auth / thin manuscript)
+  const contentType = res.headers.get("content-type") || "";
+  if (!res.ok && !contentType.includes("ndjson")) {
+    let message = "Could not index manuscript.";
+    try {
+      const data = (await res.json()) as { error?: string };
+      if (data.error) message = data.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+
+  if (!res.body) {
+    throw new Error("Clarence returned an empty response.");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let donePayload: {
     index?: import("@/lib/types").ManuscriptIndexData;
     passes?: number;
-    error?: string;
-  };
-  if (!res.ok || !data.index) {
-    throw new Error(data.error || "Could not index manuscript.");
+  } | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let msg: {
+        type?: string;
+        pass?: number;
+        passCount?: number;
+        chapters?: number;
+        index?: import("@/lib/types").ManuscriptIndexData;
+        passes?: number;
+        error?: string;
+      };
+      try {
+        msg = JSON.parse(trimmed) as typeof msg;
+      } catch {
+        continue;
+      }
+      if (msg.type === "start" || msg.type === "pass") {
+        opts?.onProgress?.({
+          pass: msg.pass ?? 0,
+          passCount: msg.passCount ?? 1,
+          chapters: msg.chapters,
+        });
+      } else if (msg.type === "done") {
+        donePayload = { index: msg.index, passes: msg.passes };
+      } else if (msg.type === "error") {
+        throw new Error(msg.error || "Clarence couldn’t finish reading.");
+      }
+    }
   }
-  return { index: data.index, passes: data.passes ?? 1 };
+
+  if (!donePayload?.index) {
+    throw new Error("Clarence finished without a reading — try again.");
+  }
+  return {
+    index: donePayload.index,
+    passes: donePayload.passes ?? 1,
+  };
 }

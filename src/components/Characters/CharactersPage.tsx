@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -9,6 +9,7 @@ import {
   ManuscriptIndexControls,
   useManuscriptIndex,
 } from "@/components/Manuscript/ManuscriptIndexControls";
+import { ClarencePopulateAskDialog } from "@/components/Characters/ClarencePopulateAskDialog";
 import { DepthMeter } from "@/components/Characters/DepthMeter";
 import { FamilyTreesView } from "@/components/Characters/FamilyTreesView";
 import { SeriesBibleStrip } from "@/components/Series/SeriesBibleStrip";
@@ -18,9 +19,24 @@ import {
   characterAppearances,
   characterCompleteness,
   characterDepth,
+  collapseDuplicateCharacters,
   createCharacter,
   findCharacterByName,
 } from "@/lib/characters";
+import {
+  preferCanonicalName,
+  suggestNameAliases,
+} from "@/lib/nameContinuity";
+import {
+  applyCharacterEnrichment,
+  type CharacterEnrichmentPayload,
+} from "@/lib/characterEnrichment";
+import { enrichCharacterWithClaude } from "@/hooks/useClaudeEnrichment";
+import {
+  probeFirstPersonNarrator,
+  type ClarenceAskAnswers,
+  type FirstPersonProbe,
+} from "@/lib/clarenceAsk";
 import {
   CHARACTER_ROLE_META,
   povColor,
@@ -34,30 +50,78 @@ type SortMode = "story" | "name" | "depth" | "role";
 type CastView = "roster" | "tree";
 
 const DEPTH_RANK = { stub: 0, sketch: 1, portrait: 2, living: 3 } as const;
+/** Soft cap so a huge cast doesn’t run enrich for an hour in one click. */
+const MAX_SHEETS_PER_POPULATE = 20;
+
+function isThinCharacterSheet(c: Character): boolean {
+  const hasWiki = Boolean(c.wiki?.trim());
+  const hasPsych = Boolean(
+    c.psychology?.wants?.trim() ||
+      c.psychology?.needs?.trim() ||
+      c.psychology?.fears?.trim(),
+  );
+  const hasIdentity = Boolean(
+    c.identity?.appearance?.trim() || c.identity?.occupation?.trim(),
+  );
+  const hasVoice = Boolean(c.voice?.speechNotes?.trim());
+  return !hasWiki && !hasPsych && !hasIdentity && !hasVoice;
+}
 
 export function CharactersPage() {
   const router = useRouter();
-  const { book, hydrated, addCharacter, upsertCharacters } = useBook();
+  const {
+    book,
+    hydrated,
+    addCharacter,
+    upsertCharacters,
+    deleteCharacter,
+    applyClarenceAsk,
+  } = useBook();
   const indexApi = useManuscriptIndex();
   const [view, setView] = useState<CastView>("roster");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortMode>("story");
   const [roleFilter, setRoleFilter] = useState<CharacterRole | "all">("all");
   const [castMessage, setCastMessage] = useState<string | null>(null);
+  const [askOpen, setAskOpen] = useState(false);
+  const [askProbe, setAskProbe] = useState<FirstPersonProbe | null>(null);
+  const askResolver = useRef<((answers: ClarenceAskAnswers | null) => void) | null>(
+    null,
+  );
 
   const characters = book.characters ?? [];
+
+  function requestClarenceAsk(
+    probe: FirstPersonProbe,
+  ): Promise<ClarenceAskAnswers | null> {
+    setAskProbe(probe);
+    setAskOpen(true);
+    return new Promise((resolve) => {
+      askResolver.current = resolve;
+    });
+  }
 
   const roster = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = characters.map((c) => {
       const appearances = characterAppearances(book.chapters, c);
+      const presentCount = appearances.filter((a) => a.presence === "present")
+        .length;
       const completeness = characterCompleteness(c);
-      const depth = characterDepth(c, appearances.length);
+      const depth = characterDepth(c, presentCount);
+      const firstPresent = appearances.find((a) => a.presence === "present");
       const firstIndex =
-        appearances[0] != null
-          ? appearances[0].chapterIndex * 1000 + appearances[0].sceneIndex
+        firstPresent != null
+          ? firstPresent.chapterIndex * 1000 + firstPresent.sceneIndex
           : Number.MAX_SAFE_INTEGER;
-      return { character: c, appearances, completeness, depth, firstIndex };
+      return {
+        character: c,
+        appearances,
+        presentCount,
+        completeness,
+        depth,
+        firstIndex,
+      };
     });
 
     if (roleFilter !== "all") {
@@ -109,29 +173,196 @@ export function CharactersPage() {
   async function runPopulateCast() {
     indexApi.setError(null);
     setCastMessage(null);
-    const index = await indexApi.ensureIndex();
+
+    const probe = probeFirstPersonNarrator(book);
+    let workingBook = book;
+    if (probe.needsNarratorAsk) {
+      const answers = await requestClarenceAsk(probe);
+      if (!answers) {
+        setCastMessage(
+          "Populate cancelled — tell Clarence who “I” is when ready.",
+        );
+        window.setTimeout(() => setCastMessage(null), 5000);
+        return;
+      }
+      const applied = applyClarenceAsk(answers);
+      workingBook = {
+        ...book,
+        chapters: applied.chapters,
+        characters: applied.characters,
+        clarenceContext: applied.clarenceContext,
+      };
+      setCastMessage(
+        applied.povTagged
+          ? `Noted — tagged ${applied.povTagged} scene${applied.povTagged === 1 ? "" : "s"} as ${answers.narratorName}. Reading…`
+          : `Noted — ${answers.narratorName} is the narrator. Reading…`,
+      );
+    }
+
+    const index = await indexApi.ensureIndex({
+      force: probe.needsNarratorAsk,
+      bookOverride: workingBook,
+    });
     indexApi.setPhase("applying");
     try {
-      let rosterSnapshot = [...(book.characters ?? [])];
+      let rosterSnapshot = [...(workingBook.characters ?? [])];
       const created: Character[] = [];
       for (const d of index.characters ?? []) {
-        if (findCharacterByName(rosterSnapshot, d.name)) continue;
+        // Only seed people Clarence marked on-stage (or legacy entries without flag).
+        if (d.presence === "mentioned") continue;
+        const existing = findCharacterByName(rosterSnapshot, d.name);
+        if (existing) {
+          const canonical = preferCanonicalName(existing.name, d.name);
+          const aliasSet = new Set(
+            [
+              ...(existing.aliases ?? []),
+              ...(d.aliases ?? []),
+              ...suggestNameAliases(canonical),
+              existing.name,
+              d.name,
+            ]
+              .map((a) => a.trim())
+              .filter(
+                (a) => a && a.toLowerCase() !== canonical.toLowerCase(),
+              ),
+          );
+          const upgraded = {
+            ...existing,
+            name: canonical,
+            aliases: [...aliasSet],
+            role:
+              existing.role === "unspecified" && d.role
+                ? d.role
+                : existing.role,
+            shortBio:
+              !existing.shortBio?.trim() && d.shortBio?.trim()
+                ? d.shortBio.trim()
+                : existing.shortBio,
+            updatedAt: Date.now(),
+          };
+          rosterSnapshot = rosterSnapshot.map((c) =>
+            c.id === existing.id ? upgraded : c,
+          );
+          upsertCharacters([upgraded]);
+          continue;
+        }
         const next = createCharacter({
           name: d.name,
           role: d.role ?? "unspecified",
           shortBio: d.shortBio ?? "",
+          aliases: [
+            ...new Set([
+              ...(d.aliases ?? []),
+              ...suggestNameAliases(d.name),
+            ]),
+          ],
           tags: ["from-story", "clarence"],
         });
         created.push(next);
         rosterSnapshot.push(next);
       }
       if (created.length) upsertCharacters(created);
-      setCastMessage(
-        created.length
-          ? `Added ${created.length} from the manuscript reading. Open a card to deepen.`
-          : "No new cast names — reading is up to date. Open a card to deepen.",
+
+      // Collapse Lily / Lily Chen style duplicates left from earlier reads.
+      const { kept, removedIds } = collapseDuplicateCharacters(rosterSnapshot);
+      if (removedIds.length) {
+        const removed = new Set(removedIds);
+        const mergedSurvivors = kept.filter((k) => {
+          const prev = rosterSnapshot.find((r) => r.id === k.id);
+          if (!prev) return true;
+          return (
+            prev.name !== k.name ||
+            (prev.aliases?.length ?? 0) !== (k.aliases?.length ?? 0) ||
+            prev.shortBio !== k.shortBio ||
+            prev.wiki !== k.wiki ||
+            prev.role !== k.role
+          );
+        });
+        if (mergedSurvivors.length) upsertCharacters(mergedSurvivors);
+        for (const id of removed) deleteCharacter(id);
+        rosterSnapshot = kept;
+      }
+
+      // Fill full wiki sheets (not just the cast-list tagline).
+      const indexedNames = new Set(
+        (index.characters ?? []).map((d) => d.name.trim().toLowerCase()),
       );
-      window.setTimeout(() => setCastMessage(null), 5000);
+      const toFill = rosterSnapshot.filter((c) => {
+        if (!isThinCharacterSheet(c)) return false;
+        if (created.some((n) => n.id === c.id)) return true;
+        return indexedNames.has(c.name.trim().toLowerCase());
+      });
+
+      // Backfill given/family-name aliases on thin cards so appearances expand.
+      rosterSnapshot = rosterSnapshot.map((c) => {
+        const suggested = suggestNameAliases(c.name);
+        if (!suggested.length) return c;
+        const have = new Set(
+          (c.aliases ?? []).map((a) => a.trim().toLowerCase()),
+        );
+        const add = suggested.filter((s) => !have.has(s.toLowerCase()));
+        if (!add.length) return c;
+        return { ...c, aliases: [...(c.aliases ?? []), ...add] };
+      });
+      const aliasTouched = rosterSnapshot.filter((c, i) => {
+        const prev = (book.characters ?? []).find((x) => x.id === c.id);
+        if (!prev) return created.some((n) => n.id === c.id);
+        return (c.aliases?.length ?? 0) !== (prev.aliases?.length ?? 0);
+      });
+      if (aliasTouched.length) upsertCharacters(aliasTouched);
+
+      const batch = toFill.slice(0, MAX_SHEETS_PER_POPULATE);
+      let filled = 0;
+      let failed = 0;
+
+      for (let i = 0; i < batch.length; i++) {
+        const target = batch[i]!;
+        setCastMessage(
+          `Filling ${target.name} · sheet ${i + 1} of ${batch.length}…`,
+        );
+        try {
+          const bookForEnrich = {
+            ...workingBook,
+            characters: rosterSnapshot,
+          };
+          const enrichment = await enrichCharacterWithClaude(
+            bookForEnrich,
+            target.id,
+          );
+          const latest =
+            rosterSnapshot.find((c) => c.id === target.id) ?? target;
+          const merged = applyCharacterEnrichment(
+            latest,
+            enrichment as CharacterEnrichmentPayload,
+            rosterSnapshot,
+            "fill-empty",
+          );
+          rosterSnapshot = rosterSnapshot.map((c) =>
+            c.id === merged.id ? merged : c,
+          );
+          upsertCharacters([merged]);
+          filled += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+
+      const leftover = toFill.length - batch.length;
+      const parts: string[] = [];
+      if (created.length) parts.push(`Added ${created.length}`);
+      if (filled) parts.push(`filled ${filled} sheet${filled === 1 ? "" : "s"}`);
+      if (failed) parts.push(`${failed} couldn’t be filled`);
+      if (leftover > 0) {
+        parts.push(
+          `${leftover} stub${leftover === 1 ? "" : "s"} left — open a card and Ask Clarence`,
+        );
+      }
+      setCastMessage(
+        parts.length
+          ? `${parts.join(" · ")}.`
+          : "Cast is up to date — nothing thin left to fill.",
+      );
+      window.setTimeout(() => setCastMessage(null), 7000);
     } finally {
       indexApi.setPhase("idle");
     }
@@ -163,7 +394,7 @@ export function CharactersPage() {
         </h1>
         <p className="mt-4 max-w-xl font-[family-name:var(--font-ui)] text-base leading-relaxed text-[var(--ink-muted)]">
           {view === "roster"
-            ? "Cast pages grow from the manuscript. Use Clarence to read the prose and fill empty wiki fields — voice, wants, appearance — without overwriting what you&apos;ve written by hand."
+            ? "Cast pages grow from the manuscript. Populate adds people and fills empty wiki fields from the prose — voice, wants, appearance — without overwriting what you’ve written by hand."
             : "Chart family lines and partnerships. Make as many trees as you need — houses, clans, or bloodlines."}
         </p>
 
@@ -201,7 +432,7 @@ export function CharactersPage() {
               api={indexApi}
               onPopulate={runPopulateCast}
               populateLabel={CLARENCE.populateLabel}
-              populateTitle="Add named people from the manuscript reading"
+              populateTitle="Add cast from the manuscript reading and fill empty wiki sheets"
             />
             {castMessage ? (
               <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
@@ -288,20 +519,45 @@ export function CharactersPage() {
         <EmptyCast onCreate={() => createAndOpen()} hasSearch={Boolean(search)} />
       ) : (
         <ul className="divide-y divide-[rgba(45,42,38,0.08)] border-t border-[rgba(45,42,38,0.08)]">
-          {roster.map(({ character, appearances, completeness, depth }, i) => (
+          {roster.map(
+            ({ character, appearances, presentCount, completeness, depth }, i) => (
             <RosterRow
               key={character.id}
               character={character}
-              appearanceCount={appearances.length}
+              appearanceCount={presentCount}
+              mentionCount={
+                appearances.filter((a) => a.presence === "mentioned").length
+              }
               completeness={completeness}
               depth={depth}
               index={i}
             />
-          ))}
+          ),
+          )}
         </ul>
       )}
         </>
       )}
+
+      <ClarencePopulateAskDialog
+        open={askOpen}
+        probe={askProbe}
+        onOpenChange={(open) => {
+          setAskOpen(open);
+          if (!open) {
+            // Cancel / dismiss only — confirm clears the resolver first.
+            const resolve = askResolver.current;
+            askResolver.current = null;
+            resolve?.(null);
+          }
+        }}
+        onConfirm={(answers) => {
+          const resolve = askResolver.current;
+          askResolver.current = null;
+          setAskOpen(false);
+          resolve?.(answers);
+        }}
+      />
     </div>
   );
 }
@@ -318,12 +574,14 @@ const ROLE_ORDER: Record<CharacterRole, number> = {
 function RosterRow({
   character,
   appearanceCount,
+  mentionCount = 0,
   completeness,
   depth,
   index,
 }: {
   character: Character;
   appearanceCount: number;
+  mentionCount?: number;
   completeness: number;
   depth: ReturnType<typeof characterDepth>;
   index: number;
@@ -379,10 +637,12 @@ function RosterRow({
             />
             <span className="font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
               {appearanceCount === 0
-                ? "Not yet on the page"
+                ? mentionCount > 0
+                  ? `Mentioned only · ${mentionCount}`
+                  : "Not yet on the page"
                 : appearanceCount === 1
-                  ? "1 scene"
-                  : `${appearanceCount} scenes`}
+                  ? "Present in 1 scene"
+                  : `Present in ${appearanceCount} scenes`}
             </span>
           </div>
         </div>

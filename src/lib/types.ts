@@ -491,6 +491,9 @@ export interface ManuscriptIndexData {
     role?: CharacterRole;
     shortBio?: string;
     evidence?: string;
+    aliases?: string[];
+    /** present = on-stage; mentioned = talked about only */
+    presence?: "present" | "mentioned";
   }>;
   locations: Array<{
     name: string;
@@ -599,6 +602,15 @@ export interface Book {
    * this instead of re-reading on every click. Stale when sourceHash diverges.
    */
   manuscriptIndex?: ManuscriptIndexData;
+  /**
+   * Author answers Clarence asked before populate (e.g. first-person narrator).
+   * Injected into index/enrich prompts so “I” maps to a real person.
+   */
+  clarenceContext?: {
+    narratorName?: string;
+    authorNotes?: string;
+    updatedAt: number;
+  };
   /** Optional link to a library series bible. */
   seriesId?: string | null;
   /** Daily / manuscript goals and day log. */
