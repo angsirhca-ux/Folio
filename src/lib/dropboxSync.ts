@@ -150,12 +150,27 @@ function isEphemeralVercelHost(hostname: string): boolean {
   return /-[a-z0-9]{8,}(?:-|$)/i.test(hostname.replace(/\.vercel\.app$/i, ""));
 }
 
+function isLocalDeskOrigin(origin: string): boolean {
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === "127.0.0.1" || hostname === "localhost";
+  } catch {
+    return false;
+  }
+}
+
 function appOrigin(): string {
   if (typeof window === "undefined") return "";
+  const live = window.location.origin;
+  // Desktop / local always use the live origin so PKCE returns to this window
+  // (never the Vercel production URL baked into NEXT_PUBLIC_APP_ORIGIN).
+  if (window.folioDesk?.isDesktop || isLocalDeskOrigin(live)) {
+    return live;
+  }
   // Prefer explicit production origin so preview/alias hosts don't break OAuth.
   const configured = process.env.NEXT_PUBLIC_APP_ORIGIN?.trim().replace(/\/$/, "");
   if (configured) return configured;
-  return window.location.origin;
+  return live;
 }
 
 function redirectUri(): string {
@@ -207,10 +222,17 @@ export async function beginDropboxAuth(): Promise<void> {
   }
   const verifier = randomVerifier();
   sessionStorage.setItem(VERIFIER_KEY, verifier);
+  // Desktop opens the system browser — keep verifier across the round-trip.
+  try {
+    localStorage.setItem(VERIFIER_KEY, verifier);
+  } catch {
+    /* ignore */
+  }
   try {
     const path = `${window.location.pathname}${window.location.search}`;
     if (path.startsWith("/") && !path.startsWith("//")) {
       sessionStorage.setItem(RETURN_KEY, path);
+      localStorage.setItem(RETURN_KEY, path);
     }
   } catch {
     /* ignore */
@@ -232,15 +254,24 @@ export async function beginDropboxAuth(): Promise<void> {
       "files.metadata.write",
     ].join(" "),
   });
-  window.location.href = `https://www.dropbox.com/oauth2/authorize?${params}`;
+  const authUrl = `https://www.dropbox.com/oauth2/authorize?${params}`;
+
+  // Folio Desk: OAuth in the system browser (Google sign-in is blank inside Electron).
+  if (window.folioDesk?.openExternal) {
+    await window.folioDesk.openExternal(authUrl);
+    return;
+  }
+  window.location.href = authUrl;
 }
 
 /** Where to send the user after a successful Dropbox OAuth. */
 export function consumeDropboxReturnPath(fallback = "/books"): string {
   if (typeof window === "undefined") return fallback;
   try {
-    const raw = sessionStorage.getItem(RETURN_KEY);
+    const raw =
+      sessionStorage.getItem(RETURN_KEY) || localStorage.getItem(RETURN_KEY);
     sessionStorage.removeItem(RETURN_KEY);
+    localStorage.removeItem(RETURN_KEY);
     if (raw && raw.startsWith("/") && !raw.startsWith("//")) return raw;
   } catch {
     /* ignore */
@@ -252,7 +283,8 @@ export function consumeDropboxReturnPath(fallback = "/books"): string {
 export async function completeDropboxAuth(code: string): Promise<void> {
   const clientId = dropboxAppKey();
   if (!clientId) throw new Error("Dropbox app key missing.");
-  const verifier = sessionStorage.getItem(VERIFIER_KEY);
+  const verifier =
+    sessionStorage.getItem(VERIFIER_KEY) || localStorage.getItem(VERIFIER_KEY);
   if (!verifier) {
     throw new Error("Missing PKCE verifier — try connecting again.");
   }
@@ -270,42 +302,41 @@ export async function completeDropboxAuth(code: string): Promise<void> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  const data = (await res.json()) as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || "Dropbox token exchange failed.");
+  }
+  const json = (await res.json()) as {
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
     account_id?: string;
-    error_description?: string;
-    error?: string;
   };
-  if (!res.ok || !data.access_token || !data.refresh_token) {
-    throw new Error(
-      data.error_description || data.error || "Dropbox authorization failed.",
-    );
+  sessionStorage.removeItem(VERIFIER_KEY);
+  try {
+    localStorage.removeItem(VERIFIER_KEY);
+  } catch {
+    /* ignore */
   }
 
-  sessionStorage.removeItem(VERIFIER_KEY);
-
   const tokens: TokenBundle = {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + (data.expires_in ?? 14400) * 1000 - 60_000,
-    accountId: data.account_id,
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token,
+    expiresAt: Date.now() + (json.expires_in || 14400) * 1000 - 60_000,
+    accountId: json.account_id,
   };
-
   saveTokens(tokens);
-
+  // Enrich with account email/name when possible (best-effort).
   try {
     const account = await dropboxRpc<{
       email?: string;
       name?: { display_name?: string };
     }>("users/get_current_account", {});
-    const next = {
+    saveTokens({
       ...tokens,
       email: account.email,
       displayName: account.name?.display_name,
-    };
-    saveTokens(next);
+    });
   } catch {
     // Account info is optional for sync.
   }

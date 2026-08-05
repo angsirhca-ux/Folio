@@ -5,6 +5,7 @@ declare global {
     folioDesk?: {
       isDesktop: boolean;
       platform: string;
+      openExternal?: (url: string) => Promise<void>;
     };
   }
 }

@@ -2,10 +2,20 @@
  * Folio Desk — Electron main process.
  * Dev: loads Next.js on localhost:3000
  * Prod: starts the Next standalone server, then opens the window.
+ *
+ * Dropbox OAuth runs in the system browser (Google sign-in is blank inside
+ * Electron). After auth, the browser hits localhost and hands off via the
+ * folio-desk:// protocol back into this window.
  */
 
-const { app, BrowserWindow, shell, Menu } = require("electron");
-const { spawn } = require("child_process");
+const {
+  app,
+  BrowserWindow,
+  shell,
+  Menu,
+  utilityProcess,
+  ipcMain,
+} = require("electron");
 const path = require("path");
 const http = require("http");
 const fs = require("fs");
@@ -16,12 +26,49 @@ const useStandalone =
   app.isPackaged || process.env.FOLIO_USE_STANDALONE === "1";
 const isDev = !useStandalone;
 const DEV_URL = process.env.FOLIO_DEV_URL || "http://127.0.0.1:3000";
+/**
+ * Fixed port for the packaged app so Dropbox OAuth redirect stays stable.
+ * Register in Dropbox App Console:
+ *   http://127.0.0.1:18765/dropbox/callback
+ */
+const DESK_PORT = Number(process.env.FOLIO_DESK_PORT) || 18765;
+const DESK_ORIGIN = `http://127.0.0.1:${DESK_PORT}`;
+const PROTOCOL = "folio-desk";
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
-/** @type {import('child_process').ChildProcess | null} */
+/** @type {Electron.UtilityProcess | null} */
 let serverProcess = null;
 let serverPort = 0;
+/** @type {string | null} */
+let pendingDeepLink = null;
+let appOrigin = isDev ? DEV_URL.replace(/\/$/, "") : DESK_ORIGIN;
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    const link = argv.find(
+      (a) => typeof a === "string" && a.startsWith(`${PROTOCOL}://`),
+    );
+    if (link) handleDeepLink(link);
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [
+      path.resolve(process.argv[1]),
+    ]);
+  }
+} else {
+  app.setAsDefaultProtocolClient(PROTOCOL);
+}
 
 function loadEnvFiles() {
   const candidates = [];
@@ -56,15 +103,22 @@ function loadEnvFiles() {
   }
 }
 
-function findFreePort() {
+/** Resolve when `port` is free on 127.0.0.1, else reject. */
+function assertPortFree(port) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
+    server.once("error", (err) => {
+      reject(
+        err && err.code === "EADDRINUSE"
+          ? new Error(
+              `Port ${port} is already in use. Quit the other Folio Desk (or whatever holds it), or set FOLIO_DESK_PORT and register that redirect in Dropbox.`,
+            )
+          : err,
+      );
+    });
+    server.listen(port, "127.0.0.1", () => {
       server.close(() => resolve(port));
     });
-    server.on("error", reject);
   });
 }
 
@@ -97,7 +151,8 @@ function standaloneDir() {
 }
 
 async function startProductionServer() {
-  const port = await findFreePort();
+  // Fixed port — Dropbox only accepts registered redirect URIs.
+  const port = await assertPortFree(DESK_PORT);
   serverPort = port;
   const dir = standaloneDir();
   const serverJs = path.join(dir, "server.js");
@@ -107,16 +162,17 @@ async function startProductionServer() {
     );
   }
 
-  serverProcess = spawn(process.execPath, [serverJs], {
+  // utilityProcess = headless Node child (no second Dock icon).
+  serverProcess = utilityProcess.fork(serverJs, [], {
     cwd: dir,
+    serviceName: "folio-desk-server",
+    stdio: isDev ? "inherit" : "pipe",
     env: {
       ...process.env,
-      ELECTRON_RUN_AS_NODE: "1",
       PORT: String(port),
       HOSTNAME: "127.0.0.1",
       NODE_ENV: "production",
     },
-    stdio: isDev ? "inherit" : "pipe",
   });
 
   serverProcess.on("exit", (code) => {
@@ -126,9 +182,35 @@ async function startProductionServer() {
     }
   });
 
-  const url = `http://127.0.0.1:${port}`;
+  const url = DESK_ORIGIN;
   await waitForServer(url);
   return url;
+}
+
+/**
+ * folio-desk://dropbox/callback?code=… → load the in-app callback route
+ * so PKCE can finish with the verifier stored in the Desk window.
+ */
+function handleDeepLink(url) {
+  try {
+    const parsed = new URL(url);
+    const isDropbox =
+      parsed.hostname === "dropbox" ||
+      parsed.pathname.includes("dropbox/callback");
+    if (!isDropbox) return;
+
+    const qs = parsed.search || "";
+    const target = `${appOrigin}/dropbox/callback${qs}`;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.loadURL(target);
+    } else {
+      pendingDeepLink = target;
+    }
+  } catch (err) {
+    console.error("Folio Desk deep link failed", err);
+  }
 }
 
 function createWindow(url) {
@@ -157,7 +239,9 @@ function createWindow(url) {
     return { action: "deny" };
   });
 
-  mainWindow.loadURL(url);
+  const start = pendingDeepLink || url;
+  pendingDeepLink = null;
+  mainWindow.loadURL(start);
 
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -225,6 +309,7 @@ async function boot() {
   buildMenu();
 
   const url = isDev ? DEV_URL : await startProductionServer();
+  appOrigin = url.replace(/\/$/, "");
   if (isDev) {
     try {
       await waitForServer(DEV_URL, 80);
@@ -238,7 +323,25 @@ async function boot() {
   createWindow(url);
 }
 
+ipcMain.handle("folio:open-external", async (_event, url) => {
+  if (typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+    throw new Error("Invalid external URL");
+  }
+  await shell.openExternal(url);
+});
+
+// macOS: open from custom protocol while app is running / cold-started
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
 app.whenReady().then(() => {
+  const launchLink = process.argv.find(
+    (a) => typeof a === "string" && a.startsWith(`${PROTOCOL}://`),
+  );
+  if (launchLink) handleDeepLink(launchLink);
+
   boot().catch((err) => {
     console.error(err);
     app.quit();
@@ -256,8 +359,12 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  if (serverProcess && !serverProcess.killed) {
-    serverProcess.kill();
+  if (serverProcess) {
+    try {
+      serverProcess.kill();
+    } catch {
+      /* ignore */
+    }
     serverProcess = null;
   }
 });

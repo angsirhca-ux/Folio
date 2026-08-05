@@ -29,6 +29,10 @@ mac:
     - zip
   hardenedRuntime: true
   gatekeeperAssess: false
+protocols:
+  - name: Folio Desk
+    schemes:
+      - folio-desk
 dmg:
   title: Folio Desk
 linux:

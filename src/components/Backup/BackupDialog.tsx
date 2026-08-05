@@ -28,6 +28,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Separator } from "@/components/ui/separator";
 import { useBook } from "@/providers/BookProvider";
 import { readBackupFile } from "@/lib/backup";
+import { dropboxRedirectUriForDisplay } from "@/lib/dropboxSync";
 import { formatRelativeDate } from "@/lib/scenes";
 import { snapshotWordDelta } from "@/lib/snapshots";
 import { formatWordCount, cn } from "@/lib/utils";
@@ -152,12 +153,17 @@ export function BackupDialog({
               </p>
               {!dropboxStatus.configured ? (
                 <p className="font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
+                  Dropbox is how Folio Desk and phone write (/m) share one shelf.
                   Add{" "}
                   <span className="text-[var(--ink)]">
                     NEXT_PUBLIC_DROPBOX_APP_KEY
                   </span>{" "}
-                  to .env.local (see env.example), create an App Folder app in
-                  the Dropbox console, then restart the server.
+                  before building the desktop app (it is baked in at build time —
+                  see env.example), register this redirect in the Dropbox
+                  console, then rebuild:
+                  <span className="mt-2 block break-all font-mono text-[0.7rem] text-[var(--ink)]">
+                    {dropboxRedirectUriForDisplay()}
+                  </span>
                 </p>
               ) : dropboxStatus.connected ? (
                 <>
@@ -249,9 +255,12 @@ export function BackupDialog({
               ) : (
                 <>
                   <p className="font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
-                    Connect Dropbox to keep manuscripts across laptops and
-                    phones — same trust model as Scrivener. Folio only uses its
-                    App Folder.
+                    Connect Dropbox so Folio Desk and phone write (/m) share the
+                    same shelf — otherwise each device is a silo. Folio only uses
+                    its App Folder.
+                    {typeof window !== "undefined" && window.folioDesk?.isDesktop
+                      ? " Sign-in opens in your browser, then returns here."
+                      : ""}
                   </p>
                   <Button
                     type="button"
@@ -269,6 +278,12 @@ export function BackupDialog({
                     <Cloud className="h-3.5 w-3.5" strokeWidth={1.5} />
                     Connect Dropbox
                   </Button>
+                  <p className="font-[family-name:var(--font-ui)] text-[0.7rem] leading-relaxed text-[var(--ink-faint)]">
+                    Redirect URI for the Dropbox console:{" "}
+                    <span className="break-all font-mono text-[var(--ink-muted)]">
+                      {dropboxRedirectUriForDisplay()}
+                    </span>
+                  </p>
                 </>
               )}
             </section>

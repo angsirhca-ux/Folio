@@ -57,7 +57,18 @@ npm run desktop:dist:mac
 npm run desktop:dist
 ```
 
-**API keys:** Put your `.env.local` values in `~/Library/Application Support/Folio Desk/.env` (macOS) so Clarence and other AI features work in the packaged app.
+**API keys (Clarence):** Put `ANTHROPIC_API_KEY` in `~/Library/Application Support/Folio Desk/.env` (macOS) so AI features work in the packaged app.
+
+**Dropbox (phone ↔ desk):** Without Dropbox, Folio Desk and mobile write (`/m`) each keep a separate local shelf — sync is the point. Before packaging:
+
+1. Set `NEXT_PUBLIC_DROPBOX_APP_KEY` in `.env.local` (baked at `next build` — userData `.env` alone is not enough for the client).
+2. In the [Dropbox App Console](https://www.dropbox.com/developers/apps), add redirect URI:
+   `http://127.0.0.1:18765/dropbox/callback`
+   (also keep `:3000` for `npm run desktop:dev` / web).
+3. Do **not** set `NEXT_PUBLIC_APP_ORIGIN` when building the desktop app.
+4. In Folio Desk → Backup & sync → **Connect Dropbox**. On the phone, open the same Folio deploy at `/m` and connect the same Dropbox account.
+
+Packaged Folio Desk always listens on port **18765** so that OAuth redirect stays registered.
 
 ## Shortcuts
 
