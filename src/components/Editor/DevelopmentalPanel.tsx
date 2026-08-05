@@ -900,12 +900,13 @@ function FlagCard({
           <p className="font-[family-name:var(--font-ui)] text-[0.6rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
             Suggestions · panel only
           </p>
-          <ol className="mt-2 space-y-2">
+          <ol className="mt-2 space-y-2.5">
             {(flag.suggestions ?? []).slice(0, 2).map((s, i) => {
               const key = `${flag.id}:${i}`;
               const pinKey = `${flag.id}:pin:${i}`;
               const selected = activeSuggestionKey === key;
               const pinned = pinFlashKey === pinKey;
+              const roleLabel = i === 0 ? "Direction" : "Example";
               return (
                 <li key={key} className="flex gap-1">
                   <button
@@ -918,10 +919,12 @@ function FlagCard({
                         : "text-[var(--ink-muted)] hover:bg-[rgba(45,42,38,0.04)] hover:text-[var(--ink)]",
                     )}
                   >
-                    <span className="shrink-0 tabular-nums text-[var(--ink-faint)]">
-                      {i + 1}.
+                    <span className="w-16 shrink-0 pt-0.5 font-[family-name:var(--font-ui)] text-[0.58rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
+                      {roleLabel}
                     </span>
-                    <span>{s}</span>
+                    <span className={i === 1 ? "italic text-[var(--ink)]" : undefined}>
+                      {s}
+                    </span>
                   </button>
                   <button
                     type="button"

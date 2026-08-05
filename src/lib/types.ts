@@ -764,8 +764,9 @@ export interface DevelopmentalFlag {
   /** What to notice — diagnostic framing. */
   note: string;
   /**
-   * Exactly two directional suggestions for the author to consider.
-   * Shown only in the AI panel — never inserted into the manuscript.
+   * Exactly two panel-only suggestions:
+   * [0] direction (gentle craft steer), [1] short illustrative example.
+   * Never inserted into the manuscript.
    */
   suggestions: [string, string];
   /** Author reaction — kept on the card until closed. */

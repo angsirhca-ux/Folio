@@ -1,4 +1,5 @@
-import { asObjectArray, chapterToPlainText, formatMemoryBlocks } from "./developmentalEditor";
+import { asObjectArray } from "@/lib/asObjectArray";
+import { chapterToPlainText, formatMemoryBlocks } from "./developmentalEditor";
 import {
   MANUSCRIPT_CONTEXT_BUDGET,
   packBalancedExcerpts,
@@ -50,13 +51,13 @@ function normalizeSuggestions(raw: unknown): [string, string] {
     ? raw
         .map((s) => (typeof s === "string" ? s.trim() : ""))
         .filter(Boolean)
-        .map((s) => s.slice(0, 280))
+        .map((s) => s.slice(0, 420))
     : [];
   while (list.length < 2) {
     list.push(
       list.length === 0
         ? "Consider checking earlier chapters for the established detail."
-        : "Consider a quiet reminder beat so the reader (and later you) stay aligned.",
+        : "e.g. align this beat with the earlier fact, or add a quiet bridge so the change is earned.",
     );
   }
   return [list[0], list[1]];
@@ -317,7 +318,9 @@ You read the WHOLE book (ledger + excerpts + bible) and FLAG inconsistencies —
 
 HARD RULES:
 - Do NOT insert or rewrite manuscript prose. Suggestions stay in this review only.
-- Every flag needs: verbatim excerpt (findable in the provided text), diagnostic note, EXACTLY TWO gentle suggestions ("perhaps…", "consider…").
+- Every flag needs: verbatim excerpt (findable in the provided text), diagnostic note, EXACTLY TWO suggestions:
+  1) DIRECTION — gentle steer (perhaps/consider…).
+  2) EXAMPLE — short concrete sketch of a fix ("e.g. check the spelling against…", "e.g. align the cast tag with…").
 - Include chapterId (exact id from ledger) and sceneIndex when possible; also chapterTitle.
 - Prefer concrete contradictions over vague vibes.
 - Respect AUTHOR PREFERENCES for tone of feedback; never skip a real continuity contradiction because the author disliked a similar note.
@@ -370,6 +373,8 @@ export const continuityTool: Anthropic.Tool = {
             },
             suggestions: {
               type: "array",
+              description:
+                "Exactly two: [0] DIRECTION, [1] short EXAMPLE of how to resolve the continuity slip.",
               items: { type: "string" },
               minItems: 2,
               maxItems: 2,

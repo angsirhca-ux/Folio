@@ -57,7 +57,7 @@ export function BookPage({
     );
     if (!pass) return [];
     const items: ReviewHighlightItem[] = [];
-    for (const flag of pass.flags) {
+    for (const flag of Array.isArray(pass.flags) ? pass.flags : []) {
       if (flag.closed) continue;
       if (!flag.excerpt?.trim()) continue;
       if (

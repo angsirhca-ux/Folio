@@ -10,13 +10,20 @@ import CharacterCount from "@tiptap/extension-character-count";
 import { SceneBreak } from "@/components/Editor/SceneBreak";
 import { ReviewHighlight } from "@/components/Editor/ReviewHighlight";
 import type { ReviewHighlightItem } from "@/components/Editor/ReviewHighlight";
+import { ResumeMarker } from "@/components/Editor/ResumeMarker";
 import {
   MentionHint,
   type MentionActivate,
 } from "@/components/Editor/MentionHint";
 import type { MentionTerm } from "@/lib/mentionHints";
 import { focusEditorScene } from "@/lib/focusEditorScene";
+import { scrollEditorPosIntoView } from "@/lib/editorNavigate";
 import { registerManuscriptPendingFlush } from "@/lib/manuscriptPendingFlush";
+import {
+  clearResumePoint,
+  peekResumePoint,
+  stashResumePoint,
+} from "@/lib/resumeMarkerStore";
 import { cn } from "@/lib/utils";
 
 const CONTENT_DEBOUNCE_MS = 450;
@@ -69,6 +76,7 @@ export function ManuscriptEditor({
   const applyingExternalRef = useRef(false);
   const editorRef = useRef<Editor | null>(null);
   const dirtyRef = useRef(false);
+  const lastCaretRef = useRef({ documentId, pos: 1 });
 
   function captureHtml(ed: Editor | null | undefined): string {
     if (ed && !ed.isDestroyed) {
@@ -137,6 +145,7 @@ export function ManuscriptEditor({
       CharacterCount,
       SceneBreak,
       ReviewHighlight,
+      ResumeMarker,
       MentionHint.configure({
         onActivate: (hit) => onMentionRef.current?.(hit),
       }),
@@ -286,6 +295,76 @@ export function ManuscriptEditor({
       timers.forEach((t) => window.clearTimeout(t));
     };
   }, [editor, sceneFocus]);
+
+  // Remember caret when leaving (tab hide, sleep, navigate away).
+  useEffect(() => {
+    if (!editor) return;
+
+    const trackCaret = () => {
+      if (editor.isDestroyed) return;
+      lastCaretRef.current = {
+        documentId: chapterIdRef.current,
+        pos: editor.state.selection.from,
+      };
+    };
+    trackCaret();
+    editor.on("selectionUpdate", trackCaret);
+
+    const stashFromEditor = () => {
+      const { documentId: id, pos } = lastCaretRef.current;
+      stashResumePoint(id, pos);
+    };
+
+    const showStashed = () => {
+      if (editor.isDestroyed) return;
+      const pos = peekResumePoint(documentId);
+      if (pos == null) return;
+      editor.commands.setResumeMarker(pos);
+      requestAnimationFrame(() => {
+        if (!editor.isDestroyed) scrollEditorPosIntoView(editor, pos);
+      });
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        stashFromEditor();
+      } else {
+        showStashed();
+      }
+    };
+
+    const onPageHide = () => stashFromEditor();
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+
+    const restoreTimer = window.setTimeout(showStashed, 80);
+
+    return () => {
+      window.clearTimeout(restoreTimer);
+      editor.off("selectionUpdate", trackCaret);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      stashFromEditor();
+    };
+  }, [editor, documentId]);
+
+  // Typing clears persisted point as well as the decoration
+  useEffect(() => {
+    if (!editor) return;
+    const onTransaction = ({
+      transaction,
+    }: {
+      transaction: { docChanged: boolean };
+    }) => {
+      if (!transaction.docChanged) return;
+      clearResumePoint(chapterIdRef.current);
+    };
+    editor.on("transaction", onTransaction);
+    return () => {
+      editor.off("transaction", onTransaction);
+    };
+  }, [editor]);
 
   return (
     <div

@@ -12,6 +12,7 @@ import {
   reviewToolForKind,
   type ReviewPayload,
 } from "@/lib/developmentalEditor";
+import { asObjectArray } from "@/lib/asObjectArray";
 import {
   anthropicModel,
   extractToolInput,
@@ -29,6 +30,16 @@ import type {
 export const runtime = "nodejs";
 /** Long chapters run several windowed Claude calls — allow up to 5 minutes. */
 export const maxDuration = 300;
+
+/** Coerce Claude tool JSON so flags/memoryUpdates are always arrays. */
+function coerceReviewPayload(raw: ReviewPayload): ReviewPayload {
+  return {
+    ...raw,
+    summary: typeof raw?.summary === "string" ? raw.summary : String(raw?.summary ?? ""),
+    flags: asObjectArray(raw?.flags),
+    memoryUpdates: asObjectArray(raw?.memoryUpdates),
+  };
+}
 
 export async function GET() {
   const configured = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
@@ -187,7 +198,7 @@ Remember:
 - Return discrete flags for specific moments (verbatim excerpts the author can find on the page).
 - Flag real issues — don’t drop problems to keep the list short. Soft max around ${MAX_FLAGS_PER_PASS} flags across the whole chapter; collapse identical repeats into representative moments.
 - A summary overview is fine, but flags are required whenever you notice issues — do not put everything only in the summary.
-- Give EXACTLY TWO suggestions per flag (directional seeds like "perhaps…" / "consider…").
+- Give EXACTLY TWO suggestions per flag: (1) DIRECTION — a gentle craft steer; (2) EXAMPLE — a short illustrative sketch ("e.g. something like…") so the author can see what you mean. Specific beats beat vague verbs like "reveal" / "show". Never a full paste-ready rewrite.
 - Suggestions stay in this review only — never rewrite or insert into the manuscript.
 
 ${context}`,
@@ -210,10 +221,10 @@ ${context}`,
 
       const { pass, memoryUpdates } = normalizeReviewPayload(
         body.kind,
-        raw,
+        coerceReviewPayload(raw),
         chapter,
       );
-      allFlags.push(...pass.flags);
+      allFlags.push(...(Array.isArray(pass.flags) ? pass.flags : []));
       if (pass.summary.trim()) {
         summaries.push(
           windows.length > 1

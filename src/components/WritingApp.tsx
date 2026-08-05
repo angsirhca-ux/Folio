@@ -270,7 +270,10 @@ export function WritingApp() {
   const hasNotes = Boolean(activeChapter.notes?.trim());
   const hasEditorFlags = Boolean(
     (book.developmentalEditor?.passes ?? []).some(
-      (p) => p.chapterId === activeChapter.id && p.flags.length > 0,
+      (p) =>
+        p.chapterId === activeChapter.id &&
+        Array.isArray(p.flags) &&
+        p.flags.length > 0,
     ),
   );
   const hasBetaReview = Boolean(

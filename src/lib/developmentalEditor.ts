@@ -11,9 +11,12 @@ import type {
   DevelopmentalSeverity,
 } from "./types";
 import { DEVELOPMENTAL_CATEGORY_META } from "./types";
+import { asObjectArray } from "./asObjectArray";
 import { createId } from "./utils";
 import { continuityNotesForPrompt } from "./continuity";
 import { getSceneHtmlParts } from "./manuscriptScenes";
+
+export { asObjectArray } from "./asObjectArray";
 
 export const REVIEW_TOOL_NAME = "save_editorial_review";
 
@@ -298,22 +301,6 @@ export type ReviewPayload = {
   }>;
 };
 
-/** Claude sometimes returns a single object or keyed map instead of an array. */
-export function asObjectArray<T extends object>(raw: unknown): T[] {
-  if (Array.isArray(raw)) return raw.filter(Boolean) as T[];
-  if (raw && typeof raw === "object") {
-    const values = Object.values(raw as Record<string, unknown>);
-    if (values.length > 0 && values.every((v) => v && typeof v === "object")) {
-      return values as T[];
-    }
-    // Single flag/note object
-    if ("excerpt" in (raw as object) || "text" in (raw as object) || "note" in (raw as object)) {
-      return [raw as T];
-    }
-  }
-  return [];
-}
-
 function normalizeSuggestions(
   raw: unknown,
 ): [string, string] {
@@ -321,13 +308,13 @@ function normalizeSuggestions(
     ? raw
         .map((s) => (typeof s === "string" ? s.trim() : ""))
         .filter(Boolean)
-        .map((s) => s.slice(0, 280))
+        .map((s) => s.slice(0, 420))
     : [];
   while (list.length < 2) {
     list.push(
       list.length === 0
         ? "Consider what a concrete beat of action or sensory detail might do here."
-        : "Consider whether a quieter choice — gesture, silence, or image — would carry more.",
+        : "e.g. something like a single concrete image or gesture that carries the beat without naming it.",
     );
   }
   return [list[0], list[1]];
@@ -811,7 +798,7 @@ export function buildReviewContext(args: {
     cast ? `Cast roster (names only — for voice/consistency checks):\n${cast}` : "",
     places ? `Places (names only):\n${places}` : "",
     voiceBible
-      ? `\nCHARACTER VOICE BIBLE (from this book's wiki for POV/cast in this chapter — check dialogue/interiority against these notes; suggest questions, not replacement lines):\n${voiceBible}`
+      ? `\nCHARACTER VOICE BIBLE (from this book's wiki for POV/cast in this chapter — check dialogue/interiority against these notes; DIRECTION may ask a question, EXAMPLE may sketch a tiny sample beat — never a paste-ready monologue):\n${voiceBible}`
       : "",
     "",
     args.windowNote
@@ -825,19 +812,21 @@ export function buildReviewContext(args: {
 
 export function reviewSystemPrompt(kind: DevelopmentalPassKind): string {
   const shared = `You are a developmental editor and copy editor for a working novelist.
-You FLAG specific moments in the chapter and offer brief directional suggestions — but you never touch the manuscript.
+You FLAG specific moments in the chapter and offer brief, usable suggestions — but you never touch the manuscript.
 
 HARD RULES:
 - Do NOT insert, paste, or apply anything into the manuscript. Suggestions exist only in this review response.
-- Do NOT rewrite the flagged sentence as polished replacement prose ready to drop in.
+- Do NOT offer a full polished rewrite of the paragraph ready to drop in. Keep examples short and tentative.
 - The summary alone is NOT enough. You MUST return discrete flags for concrete moments in the text.
-- Every flag needs: a short verbatim excerpt (a phrase or sentence the author can find on the page), a diagnostic note, and EXACTLY TWO suggestions.
+- Every flag needs: a short verbatim excerpt (a phrase or sentence the author can find on the page), a diagnostic note, and EXACTLY TWO suggestions with fixed roles:
+  1) DIRECTION — one gentle craft steer (what to try / what to cut / what to lean on). Start with "perhaps…", "consider…", or "try…".
+  2) EXAMPLE — one short illustrative sketch of how that direction might sound on the page (a clause or two, or a tiny beat). Frame it as a possibility ("e.g. something like…", "for instance…"), not as the author's new line. Specific sensory or action detail beats vague verbs like "reveal" or "show".
+- Bad suggestion pair: (1) "Perhaps reveal the creature directly." (2) "Consider cutting the preamble." — too oblique; no concrete picture.
+- Good suggestion pair: (1) "Consider dropping the filter and letting the creature arrive as her vision clears." (2) "e.g. something like: the blur resolved into wet black fur and too many joints."
 - Excerpts must be copy-pasteable from the chapter — specific enough to locate (prefer under ~120 characters).
 - Flag every concrete issue you find in this chapter (don’t omit real problems to keep the list short). If the same issue recurs, flag representative moments rather than every identical repeat.
 - Soft upper bound: about ${MAX_FLAGS_PER_PASS} flags if the chapter is packed — prioritize distinct moments over duplicates.
-- Suggestions are seeds the author might try — e.g. "perhaps she notices the jacket sleeve first" or "try making eye contact before the line lands."
-- Phrase suggestions as gentle options ("perhaps…", "consider…", "try…"), not commands.
-- Always provide two distinct suggestions per flag (different angles).
+- Phrase suggestions as gentle options, not commands.
 - Flag ONLY the current chapter text provided. Other chapters are out of scope for flags.
 - Use AUTHOR PREFERENCES and EDITOR MEMORY to stay consistent: lean into patterns they liked; soften categories they disliked — but still flag genuine issues.
 - Use PRIOR CHAPTER DIGESTS when present: do not rehash the same lecture if a pattern was already noted earlier unless it clearly recurs in this chapter’s text.
@@ -860,7 +849,7 @@ Mechanics
 Prose & dialogue
 6. flow-rhythm — awkward structure; monotonous cadence; places that need varied sentence length.
 7. redundancy — filler and repeated constructions that slow the action (beyond simple word repeats).
-8. word-choice — vague adjectives or limp diction (diagnose; do not paste a rewritten sentence).
+8. word-choice — vague adjectives or limp diction (diagnose; EXAMPLE may sketch a tighter phrase, not a whole paragraph rewrite).
 9. dialogue-polish — unnatural or indistinct dialogue / clunky tags; use the voice bible when provided.
 
 For each real instance, add a flag with that line’s excerpt — do not only summarize patterns in the summary. Use only the category ids above. Soft cap ~${MAX_FLAGS_PER_PASS} if the chapter is dense with repeats.
@@ -881,6 +870,7 @@ Categories (use only these ids):
 5. named-emotion-action — emotion labeled where a gesture or concrete action beat could carry it (narrow — do not vacuum every telling).
 
 For each real instance, flag with a verbatim excerpt. Soft cap ~${MAX_FLAGS_PER_PASS}.
+EXAMPLE suggestions should name a concrete beat (hand, weight, timing, consequence) — not "make it more active."
 Ignore filter words, plot holes, and book-wide continuity. Do not rewrite the manuscript.`;
   }
 
@@ -893,7 +883,7 @@ STORY & STRUCTURE — look only for:
 3. plot-holes — logic gaps, broken world rules (use memory + roster when helpful), or timeline slips visible in this chapter.
 4. character-voice — dialogue or interiority that collapses distinct characters into one voice, or drifts from the CHARACTER VOICE BIBLE when provided.
 
-For character-voice flags: diagnose against this book's voice notes (speech, manner, wants/fears). Phrase suggestions as Socratic questions or directional seeds ("Does this sound like her under pressure?", "perhaps her fear of X would color the line") — never write replacement dialogue ready to paste.
+For character-voice flags: DIRECTION may be a Socratic question ("Does this sound like her under pressure?"). EXAMPLE may be a tiny sample line or beat in their register, clearly marked as illustrative ("e.g. she might snap something shorter, like…") — never a paste-ready monologue rewrite.
 
 Pick every clear story/structure issue (soft cap ~${MAX_FLAGS_PER_PASS}). Use only the category ids above.
 
@@ -943,7 +933,7 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
               suggestions: {
                 type: "array",
                 description:
-                  "Exactly two directional suggestions for the author (panel only — never manuscript text).",
+                  "Exactly two panel-only suggestions: [0] DIRECTION — gentle craft steer (perhaps/consider/try…). [1] EXAMPLE — short illustrative sketch of how that might look on the page (e.g. something like…), specific not oblique. Never paste-ready full rewrites.",
                 items: { type: "string" },
                 minItems: 2,
                 maxItems: 2,
