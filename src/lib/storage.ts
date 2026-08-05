@@ -591,6 +591,32 @@ export function loadBook(): Book {
 /** Persist the active manuscript and keep the library shelf in sync. */
 export function saveBook(book: Book): void {
   if (typeof window === "undefined") return;
+  // Fast path: patch localStorage without re-hydrating every book in the library.
+  // Full loadLibrary() was the autosave hitch on large shelves.
+  try {
+    const raw = localStorage.getItem(LIBRARY_KEY);
+    if (raw) {
+      const library = JSON.parse(raw) as FolioLibrary;
+      const prior = Array.isArray(library.books) ? library.books : [];
+      const exists = prior.some((b) => b && b.id === book.id);
+      const books = exists
+        ? prior.map((b) => (b && b.id === book.id ? book : b))
+        : [...prior, book];
+      const next: FolioLibrary = {
+        version: 1,
+        activeBookId: book.id,
+        books: books as Book[],
+        series: library.series ?? [],
+        trash: library.trash ?? [],
+      };
+      localStorage.setItem(LIBRARY_KEY, JSON.stringify(next));
+      localStorage.setItem(BOOK_KEY, JSON.stringify(book));
+      return;
+    }
+  } catch {
+    /* fall through to hydrate path */
+  }
+
   const library = loadLibrary();
   const exists = library.books.some((b) => b.id === book.id);
   const books = exists

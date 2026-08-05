@@ -82,8 +82,21 @@ export function BookPage({
   ]);
 
   const mentionTerms = useMemo(
-    () => (settings.focusMode ? [] : collectMentionTerms(book)),
-    [book, settings.focusMode],
+    () =>
+      settings.focusMode
+        ? []
+        : collectMentionTerms({
+            characters: book.characters,
+            locations: book.locations,
+            encyclopedia: book.encyclopedia,
+          }),
+    // Content edits must not rebuild mention decorations — only bible roster changes.
+    [
+      settings.focusMode,
+      book.characters,
+      book.locations,
+      book.encyclopedia,
+    ],
   );
 
   return (

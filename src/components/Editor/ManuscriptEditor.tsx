@@ -18,7 +18,7 @@ import type { MentionTerm } from "@/lib/mentionHints";
 import { focusEditorScene } from "@/lib/focusEditorScene";
 import { cn } from "@/lib/utils";
 
-const CONTENT_DEBOUNCE_MS = 320;
+const CONTENT_DEBOUNCE_MS = 450;
 const MENTION_REFRESH_MS = 520;
 
 interface ManuscriptEditorProps {
@@ -61,23 +61,33 @@ export function ManuscriptEditor({
   const mentionRefreshRef = useRef<number | null>(null);
   const focusedRef = useRef(false);
   const applyingExternalRef = useRef(false);
+  const editorRef = useRef<Editor | null>(null);
+  const dirtyRef = useRef(false);
+
+  function captureHtml(ed: Editor | null | undefined): string {
+    if (ed && !ed.isDestroyed) {
+      latestHtmlRef.current = ed.getHTML();
+      dirtyRef.current = false;
+    }
+    return latestHtmlRef.current;
+  }
 
   function flushToParent() {
     if (debounceRef.current != null) {
       window.clearTimeout(debounceRef.current);
       debounceRef.current = null;
     }
-    onChangeRef.current(latestHtmlRef.current);
+    onChangeRef.current(captureHtml(editorRef.current));
   }
 
-  function scheduleToParent(html: string) {
-    latestHtmlRef.current = html;
+  function scheduleToParent(ed: Editor) {
+    dirtyRef.current = true;
     if (debounceRef.current != null) {
       window.clearTimeout(debounceRef.current);
     }
     debounceRef.current = window.setTimeout(() => {
       debounceRef.current = null;
-      onChangeRef.current(latestHtmlRef.current);
+      onChangeRef.current(captureHtml(ed));
     }, CONTENT_DEBOUNCE_MS);
   }
 
@@ -131,7 +141,8 @@ export function ManuscriptEditor({
     },
     onUpdate: ({ editor: ed }) => {
       if (applyingExternalRef.current) return;
-      scheduleToParent(ed.getHTML());
+      // Defer getHTML — serializing the whole chapter every keystroke is the lag.
+      scheduleToParent(ed);
       if (mentionRefreshRef.current != null) {
         window.clearTimeout(mentionRefreshRef.current);
       }
@@ -141,6 +152,8 @@ export function ManuscriptEditor({
       }, MENTION_REFRESH_MS);
     },
   });
+
+  editorRef.current = editor;
 
   useEffect(() => {
     if (editor && onEditorReady) onEditorReady(editor);
@@ -163,6 +176,9 @@ export function ManuscriptEditor({
         window.clearTimeout(mentionRefreshRef.current);
         mentionRefreshRef.current = null;
       }
+      if (dirtyRef.current) {
+        captureHtml(editorRef.current);
+      }
       flush(latestHtmlRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount/unmount only; flush must bind the opening onChange
@@ -171,7 +187,8 @@ export function ManuscriptEditor({
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     // While typing, TipTap is source of truth — don't reset the doc from React.
-    if (focusedRef.current || debounceRef.current != null) return;
+    if (focusedRef.current || debounceRef.current != null || dirtyRef.current)
+      return;
     if (content === latestHtmlRef.current) return;
     applyingExternalRef.current = true;
     editor.commands.setContent(content, { emitUpdate: false });

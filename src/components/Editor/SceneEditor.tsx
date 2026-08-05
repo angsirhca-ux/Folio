@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
@@ -32,6 +32,8 @@ export function SceneEditor({
   const latestHtmlRef = useRef(content);
   const debounceRef = useRef<number | null>(null);
   const applyingExternalRef = useRef(false);
+  const editorRef = useRef<Editor | null>(null);
+  const dirtyRef = useRef(false);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -61,25 +63,49 @@ export function SceneEditor({
         spellcheck: "true",
         lang: "en",
       },
+      handleDOMEvents: {
+        blur: () => {
+          if (debounceRef.current != null) {
+            window.clearTimeout(debounceRef.current);
+            debounceRef.current = null;
+          }
+          const ed = editorRef.current;
+          if (ed && !ed.isDestroyed) {
+            latestHtmlRef.current = ed.getHTML();
+            dirtyRef.current = false;
+          }
+          onChangeRef.current(latestHtmlRef.current);
+          return false;
+        },
+      },
     },
     onUpdate: ({ editor: ed }) => {
       if (applyingExternalRef.current) return;
-      const html = ed.getHTML();
-      latestHtmlRef.current = html;
+      dirtyRef.current = true;
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
       }
       debounceRef.current = window.setTimeout(() => {
         debounceRef.current = null;
+        if (!ed.isDestroyed) {
+          latestHtmlRef.current = ed.getHTML();
+          dirtyRef.current = false;
+        }
         onChangeRef.current(latestHtmlRef.current);
       }, CONTENT_DEBOUNCE_MS);
     },
   });
 
+  editorRef.current = editor;
+
   useEffect(() => {
     return () => {
       if (debounceRef.current != null) {
         window.clearTimeout(debounceRef.current);
+      }
+      const ed = editorRef.current;
+      if (dirtyRef.current && ed && !ed.isDestroyed) {
+        latestHtmlRef.current = ed.getHTML();
       }
       onChangeRef.current(latestHtmlRef.current);
     };
@@ -87,7 +113,7 @@ export function SceneEditor({
 
   useEffect(() => {
     if (!editor) return;
-    if (debounceRef.current != null) return;
+    if (debounceRef.current != null || dirtyRef.current) return;
     if (content === latestHtmlRef.current) return;
     applyingExternalRef.current = true;
     editor.commands.setContent(content, { emitUpdate: false });

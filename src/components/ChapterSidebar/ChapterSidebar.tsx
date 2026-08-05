@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SceneStatusDot } from "@/components/SceneStatusDot";
-import { splitManuscriptScenes } from "@/lib/manuscriptScenes";
 import { nextSceneStatus, type SceneStatus } from "@/lib/types";
 import { useBook } from "@/providers/BookProvider";
 import { cn } from "@/lib/utils";
@@ -140,7 +139,8 @@ export function ChapterSidebar() {
                 const isOver = overIndex === index && dragIndex !== index;
                 const canMoveUp = index > 0;
                 const canMoveDown = index < book.chapters.length - 1;
-                const scenes = splitManuscriptScenes(chapter.content);
+                // Use storyboard scene cards — don't re-parse HTML on every keystroke flush.
+                const scenes = chapter.scenes ?? [];
                 const hasScenes = scenes.length > 1;
                 const expanded = Boolean(expandedIds[chapter.id]);
 
@@ -305,20 +305,19 @@ export function ChapterSidebar() {
                           }}
                           className="overflow-hidden pb-1.5 pl-5 pr-1"
                         >
-                          {scenes.map((scene) => {
+                          {scenes.map((scene, sceneIndex) => {
                             const sceneActive =
-                              active && activeSceneIndex === scene.index;
-                            const card = chapter.scenes[scene.index];
+                              active && activeSceneIndex === sceneIndex;
                             const status: SceneStatus =
-                              card?.status ??
-                              (scene.preview ? "draft" : "outline");
+                              scene.status ??
+                              (scene.wordCount > 0 ? "draft" : "outline");
                             return (
-                              <li key={`${chapter.id}-${scene.index}`}>
+                              <li key={scene.id}>
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setActiveSceneIndex(scene.index);
-                                    focusScene(chapter.id, scene.index);
+                                    setActiveSceneIndex(sceneIndex);
+                                    focusScene(chapter.id, sceneIndex);
                                   }}
                                   className={cn(
                                     "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-200",
@@ -326,14 +325,13 @@ export function ChapterSidebar() {
                                       ? "bg-[rgba(176,141,87,0.14)] text-[var(--ink)]"
                                       : "text-[var(--ink-muted)] hover:bg-[rgba(45,42,38,0.04)] hover:text-[var(--ink)]",
                                   )}
-                                  title={scene.preview || scene.title}
+                                  title={scene.synopsis || scene.title}
                                 >
                                   <SceneStatusDot
                                     status={status}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      if (!card) return;
-                                      updateScene(card.id, {
+                                      updateScene(scene.id, {
                                         status: nextSceneStatus(status),
                                       });
                                     }}

@@ -813,7 +813,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
       setIsSaving(false);
       setIsDirty(false);
       setLastSavedAt(Date.now());
-    }, 600);
+    }, 1400);
     return () => window.clearTimeout(timer);
   }, [book, hydrated]);
 
@@ -1089,12 +1089,38 @@ export function BookProvider({ children }: { children: ReactNode }) {
     );
   }, [book]);
 
+  const wordCacheRef = useRef(
+    new Map<string, { len: number; updatedAt: number; words: number }>(),
+  );
+
   const wordCount = useMemo(() => {
     if (!book) return 0;
-    return book.chapters.reduce(
-      (sum, chapter) => sum + countWords(chapter.content),
-      0,
-    );
+    const cache = wordCacheRef.current;
+    const seen = new Set<string>();
+    let sum = 0;
+    for (const chapter of book.chapters) {
+      seen.add(chapter.id);
+      const prev = cache.get(chapter.id);
+      if (
+        prev &&
+        prev.len === (chapter.content?.length ?? 0) &&
+        prev.updatedAt === chapter.updatedAt
+      ) {
+        sum += prev.words;
+        continue;
+      }
+      const words = countWords(chapter.content ?? "");
+      cache.set(chapter.id, {
+        len: chapter.content?.length ?? 0,
+        updatedAt: chapter.updatedAt,
+        words,
+      });
+      sum += words;
+    }
+    for (const id of [...cache.keys()]) {
+      if (!seen.has(id)) cache.delete(id);
+    }
+    return sum;
   }, [book]);
 
   const sessionWords = Math.max(0, wordCount - sessionBaseline);
@@ -1104,10 +1130,17 @@ export function BookProvider({ children }: { children: ReactNode }) {
     if (!hydrated) return;
     setBook((prev) => {
       if (!prev?.goals) return prev;
-      const wc = prev.chapters.reduce(
-        (sum, chapter) => sum + countWords(chapter.content),
-        0,
-      );
+      const wc = prev.chapters.reduce((sum, chapter) => {
+        const cached = wordCacheRef.current.get(chapter.id);
+        if (
+          cached &&
+          cached.len === (chapter.content?.length ?? 0) &&
+          cached.updatedAt === chapter.updatedAt
+        ) {
+          return sum + cached.words;
+        }
+        return sum + countWords(chapter.content);
+      }, 0);
       const synced = syncGoalsWithWordCount(prev.goals, wc);
       if (
         synced.dayStartDate === prev.goals.dayStartDate &&

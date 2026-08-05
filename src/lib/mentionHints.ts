@@ -34,7 +34,9 @@ function phrasesFor(name: string, aliases: string[]): string[] {
 }
 
 /** Bible titles worth noticing while drafting. */
-export function collectMentionTerms(book: Book): MentionTerm[] {
+export function collectMentionTerms(
+  book: Pick<Book, "encyclopedia" | "characters" | "locations">,
+): MentionTerm[] {
   const terms: MentionTerm[] = [];
 
   for (const e of book.encyclopedia ?? []) {
