@@ -60,7 +60,7 @@ async function runBetaRead(args: {
   };
 }
 
-const AI_FETCH_TIMEOUT_MS = 110_000;
+const AI_FETCH_TIMEOUT_MS = 280_000;
 
 const EMOTION_TONE: Partial<Record<BetaEmotion, string>> = {
   surprised: "text-[#6B4A2A]",

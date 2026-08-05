@@ -13,6 +13,7 @@ import type {
 import { DEVELOPMENTAL_CATEGORY_META } from "./types";
 import { createId } from "./utils";
 import { continuityNotesForPrompt } from "./continuity";
+import { getSceneHtmlParts } from "./manuscriptScenes";
 
 export const REVIEW_TOOL_NAME = "save_editorial_review";
 
@@ -21,7 +22,12 @@ export const MAX_MEMORY_NOTES = 40;
 export const MAX_PASSES_KEPT = 24;
 /** Safety ceiling so a runaway response can’t hang the UI — not a “top 12 only” filter. */
 export const MAX_FLAGS_PER_PASS = 40;
-export const REVIEW_MAX_TOKENS = 6144;
+export const REVIEW_MAX_TOKENS = 8192;
+/**
+ * Long chapters are reviewed in windows of this size so each Claude call
+ * finishes before proxy timeouts (≈2–3k words per window).
+ */
+export const REVIEW_WINDOW_CHARS = 14_000;
 
 export function emptyDevelopmentalEditor(): DevelopmentalEditorState {
   return { memory: [], passes: [] };
@@ -154,6 +160,127 @@ export function chapterToPlainText(html: string): string {
 export function truncateChapterPlain(plain: string, max = CHAPTER_PLAIN_BUDGET): string {
   if (plain.length <= max) return plain;
   return `${plain.slice(0, max)}\n\n[…chapter truncated for length…]`;
+}
+
+export type ReviewTextWindow = {
+  index: number;
+  total: number;
+  label: string;
+  plain: string;
+};
+
+function splitOversizedPlain(plain: string, maxChars: number): string[] {
+  if (plain.length <= maxChars) return [plain];
+  const paras = plain.split(/\n{2,}/);
+  const chunks: string[] = [];
+  let buf = "";
+  for (const p of paras) {
+    if (!p.trim()) continue;
+    if (p.length > maxChars) {
+      if (buf) {
+        chunks.push(buf);
+        buf = "";
+      }
+      for (let i = 0; i < p.length; i += maxChars) {
+        chunks.push(p.slice(i, i + maxChars));
+      }
+      continue;
+    }
+    if (!buf) {
+      buf = p;
+    } else if (buf.length + p.length + 2 > maxChars) {
+      chunks.push(buf);
+      buf = p;
+    } else {
+      buf = `${buf}\n\n${p}`;
+    }
+  }
+  if (buf) chunks.push(buf);
+  return chunks.length ? chunks : [plain.slice(0, maxChars)];
+}
+
+/**
+ * Split a long chapter into review windows (by scene, then by paragraphs)
+ * so each Claude call finishes within timeout on ~5k+ word chapters.
+ */
+export function partitionChapterReviewWindows(
+  chapter: Pick<Chapter, "content" | "scenes" | "title">,
+  maxChars = REVIEW_WINDOW_CHARS,
+): ReviewTextWindow[] {
+  const parts = getSceneHtmlParts(chapter.content ?? "");
+  const scenes = chapter.scenes ?? [];
+  const sceneBlocks: { title: string; plain: string }[] = [];
+
+  const count = Math.max(parts.length, scenes.length, 1);
+  for (let i = 0; i < count; i++) {
+    const html = parts[i] ?? (i === 0 ? chapter.content ?? "" : "");
+    const plain = chapterToPlainText(html);
+    if (!plain.trim()) continue;
+    sceneBlocks.push({
+      title: scenes[i]?.title?.trim() || `Scene ${i + 1}`,
+      plain,
+    });
+  }
+
+  if (sceneBlocks.length === 0) {
+    const plain = truncateChapterPlain(chapterToPlainText(chapter.content ?? ""));
+    return [{ index: 0, total: 1, label: chapter.title || "Chapter", plain }];
+  }
+
+  type Pack = { labels: string[]; plains: string[]; size: number };
+  const packs: Pack[] = [];
+  let current: Pack | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    packs.push(current);
+    current = null;
+  };
+
+  for (const block of sceneBlocks) {
+    const pieces = splitOversizedPlain(block.plain, maxChars);
+    for (let pi = 0; pi < pieces.length; pi++) {
+      const piece = pieces[pi]!;
+      const label =
+        pieces.length > 1 ? `${block.title} (${pi + 1}/${pieces.length})` : block.title;
+      if (!current) {
+        current = { labels: [label], plains: [piece], size: piece.length };
+        continue;
+      }
+      if (current.size + piece.length + 12 > maxChars) {
+        flush();
+        current = { labels: [label], plains: [piece], size: piece.length };
+      } else {
+        current.labels.push(label);
+        current.plains.push(piece);
+        current.size += piece.length + 12;
+      }
+    }
+  }
+  flush();
+
+  // Single short chapter — one window
+  if (packs.length <= 1) {
+    const only = packs[0];
+    const plain = only
+      ? only.plains.join("\n\n* * *\n\n")
+      : truncateChapterPlain(chapterToPlainText(chapter.content ?? ""));
+    return [
+      {
+        index: 0,
+        total: 1,
+        label: only?.labels.join(", ") || chapter.title || "Chapter",
+        plain,
+      },
+    ];
+  }
+
+  return packs.map((p, i) => ({
+    index: i,
+    total: packs.length,
+    label: p.labels.join(", "),
+    plain: p.plains.join("\n\n* * *\n\n"),
+  }));
 }
 
 export type ReviewPayload = {
@@ -569,8 +696,13 @@ export function buildReviewContext(args: {
   memory: DevelopmentalMemoryNote[];
   /** Prior editorial passes — used for cross-chapter memory digests. */
   passes?: DevelopmentalPass[];
+  /** When reviewing a window of a long chapter. */
+  plainOverride?: string;
+  windowNote?: string;
 }): string {
-  const plain = truncateChapterPlain(chapterToPlainText(args.chapter.content));
+  const plain =
+    args.plainOverride?.trim() ||
+    truncateChapterPlain(chapterToPlainText(args.chapter.content));
   const cast = (args.book.characters ?? [])
     .slice(0, 40)
     .map((c) => {
@@ -635,6 +767,7 @@ export function buildReviewContext(args: {
     args.book.author ? `Author: ${args.book.author}` : "",
     `Pass: ${chapterPassLabel(args.kind)}`,
     `Chapter under review ONLY: ${args.chapter.title}`,
+    args.windowNote ? args.windowNote : "",
     "",
     "AUTHOR PREFERENCES (from ✓ liked / ✕ not useful on prior flags — respect tone; do not suppress real issues solely because of dislike):",
     preferencesBlock,
@@ -654,7 +787,9 @@ export function buildReviewContext(args: {
       ? `\nCHARACTER VOICE BIBLE (from this book's wiki for POV/cast in this chapter — check dialogue/interiority against these notes; suggest questions, not replacement lines):\n${voiceBible}`
       : "",
     "",
-    "CHAPTER TEXT (flag issues in THIS chapter only):",
+    args.windowNote
+      ? "CHAPTER TEXT FOR THIS WINDOW (flag issues in THIS window only — excerpts must appear below):"
+      : "CHAPTER TEXT (flag issues in THIS chapter only):",
     plain || "(empty chapter)",
   ]
     .filter(Boolean)

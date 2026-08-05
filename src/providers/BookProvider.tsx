@@ -86,6 +86,7 @@ import {
   syncChapterTitleField,
 } from "@/lib/chapterHeading";
 import { countWords } from "@/lib/utils";
+import { flushManuscriptPending } from "@/lib/manuscriptPendingFlush";
 import {
   extractSceneHtmlAt,
   insertSceneHtmlAt,
@@ -851,16 +852,75 @@ export function BookProvider({ children }: { children: ReactNode }) {
   }, [settings, hydrated]);
 
   const saveNow = useCallback(() => {
-    if (!book) return;
+    const current = bookRef.current;
+    if (!current) return;
+
+    // TipTap keeps scene breaks / last keystrokes until debounce — pull them in
+    // before writing so Save never persists a stale chapter.
+    const pending = flushManuscriptPending();
+    let toSave = current;
+    if (pending) {
+      const chapterIdx = current.chapters.findIndex(
+        (c) => c.id === pending.documentId,
+      );
+      if (chapterIdx >= 0) {
+        const chapter = current.chapters[chapterIdx]!;
+        const heading = extractChapterHeading(pending.html);
+        const title =
+          heading === null || heading === "" ? chapter.title : heading;
+        toSave = {
+          ...current,
+          chapters: current.chapters.map((c, i) =>
+            i === chapterIdx
+              ? {
+                  ...c,
+                  content: pending.html,
+                  title,
+                  updatedAt: Date.now(),
+                }
+              : c,
+          ),
+          updatedAt: Date.now(),
+        };
+      } else {
+        const dump = current.dump;
+        const pageIdx = dump?.pages.findIndex(
+          (p) => p.id === pending.documentId,
+        );
+        if (dump && pageIdx != null && pageIdx >= 0) {
+          toSave = {
+            ...current,
+            dump: {
+              ...dump,
+              pages: dump.pages.map((p, i) =>
+                i === pageIdx
+                  ? { ...p, content: pending.html, updatedAt: Date.now() }
+                  : p,
+              ),
+            },
+            updatedAt: Date.now(),
+          };
+        }
+      }
+      if (toSave !== current) {
+        skipDirtyRef.current = true;
+        bookRef.current = toSave;
+        setBook(toSave);
+        window.setTimeout(() => {
+          skipDirtyRef.current = false;
+        }, 0);
+      }
+    }
+
     setIsSaving(true);
-    saveBook(book);
+    saveBook(toSave);
     setLibraryBooks((prev) =>
-      prev.map((b) => (b.id === book.id ? book : b)),
+      prev.map((b) => (b.id === toSave.id ? toSave : b)),
     );
     setIsSaving(false);
     setIsDirty(false);
     setLastSavedAt(Date.now());
-  }, [book]);
+  }, []);
 
   const refreshDropboxStatus = useCallback(() => {
     setDropboxStatus(getDropboxStatus());
@@ -954,7 +1014,40 @@ export function BookProvider({ children }: { children: ReactNode }) {
     if (dropboxBusyRef.current || dropboxConflict) return "skipped";
     // Persist any dirty book before comparing so localDirty is honest.
     if (isDirtyRef.current && bookRef.current) {
-      saveBook(bookRef.current);
+      const pending = flushManuscriptPending();
+      let local = bookRef.current;
+      if (pending) {
+        const chapterIdx = local.chapters.findIndex(
+          (c) => c.id === pending.documentId,
+        );
+        if (chapterIdx >= 0) {
+          const chapter = local.chapters[chapterIdx]!;
+          const heading = extractChapterHeading(pending.html);
+          const title =
+            heading === null || heading === "" ? chapter.title : heading;
+          local = {
+            ...local,
+            chapters: local.chapters.map((c, i) =>
+              i === chapterIdx
+                ? {
+                    ...c,
+                    content: pending.html,
+                    title,
+                    updatedAt: Date.now(),
+                  }
+                : c,
+            ),
+            updatedAt: Date.now(),
+          };
+          bookRef.current = local;
+          skipDirtyRef.current = true;
+          setBook(local);
+          window.setTimeout(() => {
+            skipDirtyRef.current = false;
+          }, 0);
+        }
+      }
+      saveBook(local);
       setIsDirty(false);
       setLastSavedAt(Date.now());
       isDirtyRef.current = false;

@@ -124,11 +124,11 @@ async function reviewContinuity(
 }
 
 /** Client aborts before typical proxy/server ceilings so we can show a clear error. */
-const AI_FETCH_TIMEOUT_MS = 110_000;
+const AI_FETCH_TIMEOUT_MS = 280_000;
 
 function aiAbortErrorMessage(err: unknown): string {
   if (err instanceof DOMException && err.name === "AbortError") {
-    return "That pass took too long and was stopped. Try again — shorter chapters finish faster.";
+    return "That pass took too long and was stopped. Long chapters can take a few minutes — try again, or split the chapter with scene breaks.";
   }
   if (err instanceof Error) return err.message;
   return "Review failed.";
@@ -611,7 +611,7 @@ export function DevelopmentalPanel({
                         : "Reading this chapter…"}
                     </p>
                     <p className="mt-1 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
-                      Usually under a minute
+                      Longer chapters can take a few minutes
                       {busyElapsedSec > 0 ? ` · ${busyElapsedSec}s` : ""}. Stay
                       on this chapter until it finishes.
                     </p>

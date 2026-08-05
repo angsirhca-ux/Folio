@@ -57,6 +57,7 @@ export function DumpApp() {
 
             <ManuscriptEditor
               key={activeDumpPage.id}
+              documentId={activeDumpPage.id}
               content={activeDumpPage.content}
               onChange={(html) =>
                 updateDumpPageContent(html, activeDumpPage.id)

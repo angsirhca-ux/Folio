@@ -16,6 +16,7 @@ import {
 } from "@/components/Editor/MentionHint";
 import type { MentionTerm } from "@/lib/mentionHints";
 import { focusEditorScene } from "@/lib/focusEditorScene";
+import { registerManuscriptPendingFlush } from "@/lib/manuscriptPendingFlush";
 import { cn } from "@/lib/utils";
 
 const CONTENT_DEBOUNCE_MS = 450;
@@ -23,6 +24,8 @@ const MENTION_REFRESH_MS = 520;
 
 interface ManuscriptEditorProps {
   content: string;
+  /** Active chapter or dump page — so Save can flush pending prose. */
+  documentId: string;
   onChange: (html: string) => void;
   focusMode?: boolean;
   editable?: boolean;
@@ -40,6 +43,7 @@ interface ManuscriptEditorProps {
 
 export function ManuscriptEditor({
   content,
+  documentId,
   onChange,
   focusMode = false,
   editable = true,
@@ -53,6 +57,8 @@ export function ManuscriptEditor({
 }: ManuscriptEditorProps) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const chapterIdRef = useRef(documentId);
+  chapterIdRef.current = documentId;
   const onMentionRef = useRef(onMentionActivate);
   onMentionRef.current = onMentionActivate;
 
@@ -90,6 +96,22 @@ export function ManuscriptEditor({
       onChangeRef.current(captureHtml(ed));
     }, CONTENT_DEBOUNCE_MS);
   }
+
+  // Let Save / unload pull live TipTap HTML (scene breaks, last keystrokes).
+  useEffect(() => {
+    registerManuscriptPendingFlush(() => {
+      const ed = editorRef.current;
+      if (!ed || ed.isDestroyed) return null;
+      if (debounceRef.current != null) {
+        window.clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      const html = captureHtml(ed);
+      onChangeRef.current(html);
+      return { documentId: chapterIdRef.current, html };
+    });
+    return () => registerManuscriptPendingFlush(null);
+  }, []);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -139,9 +161,35 @@ export function ManuscriptEditor({
         },
       },
     },
-    onUpdate: ({ editor: ed }) => {
+    onUpdate: ({ editor: ed, transaction }) => {
       if (applyingExternalRef.current) return;
-      // Defer getHTML — serializing the whole chapter every keystroke is the lag.
+      // Scene breaks are structural — flush immediately so Save / storyboard
+      // don't miss them while the prose debounce is still pending.
+      if (transaction.docChanged) {
+        let beforeBreaks = 0;
+        let afterBreaks = 0;
+        transaction.before.descendants((node) => {
+          if (node.type.name === "sceneBreak") beforeBreaks += 1;
+        });
+        ed.state.doc.descendants((node) => {
+          if (node.type.name === "sceneBreak") afterBreaks += 1;
+        });
+        if (beforeBreaks !== afterBreaks) {
+          if (debounceRef.current != null) {
+            window.clearTimeout(debounceRef.current);
+            debounceRef.current = null;
+          }
+          onChangeRef.current(captureHtml(ed));
+          if (mentionRefreshRef.current != null) {
+            window.clearTimeout(mentionRefreshRef.current);
+          }
+          mentionRefreshRef.current = window.setTimeout(() => {
+            mentionRefreshRef.current = null;
+            if (!ed.isDestroyed) ed.commands.refreshMentionHints();
+          }, MENTION_REFRESH_MS);
+          return;
+        }
+      }
       scheduleToParent(ed);
       if (mentionRefreshRef.current != null) {
         window.clearTimeout(mentionRefreshRef.current);

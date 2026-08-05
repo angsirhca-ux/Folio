@@ -73,7 +73,7 @@ async function runCritique(args: {
   };
 }
 
-const AI_FETCH_TIMEOUT_MS = 110_000;
+const AI_FETCH_TIMEOUT_MS = 280_000;
 
 const VERDICT_STYLES: Record<
   CritiqueVerdict,

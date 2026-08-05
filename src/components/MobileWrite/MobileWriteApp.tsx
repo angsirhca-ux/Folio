@@ -219,6 +219,7 @@ export function MobileWriteApp() {
           />
           <ManuscriptEditor
             key={`${mode}-${activeId}`}
+            documentId={activeId}
             content={activeContent}
             onChange={
               mode === "manuscript"

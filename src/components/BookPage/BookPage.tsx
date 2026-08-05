@@ -128,6 +128,7 @@ export function BookPage({
 
       <ManuscriptEditor
         key={activeChapter.id}
+        documentId={activeChapter.id}
         content={activeChapter.content}
         onChange={(html) => updateChapterContent(html, activeChapter.id)}
         focusMode={settings.focusMode}

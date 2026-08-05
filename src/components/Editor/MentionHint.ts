@@ -34,7 +34,7 @@ function buildDecorations(
       "data-mention-kind": h.term.kind,
       "data-mention-id": h.term.id,
       "data-mention-label": h.term.label,
-      title: `${h.term.label} — open bible`,
+      title: `${h.term.label} — ⌘-click to open`,
     }),
   );
   return DecorationSet.create(doc, decos);
@@ -112,6 +112,9 @@ export const MentionHint = Extension.create<{
             return this.getState(state);
           },
           handleClick(_view, _pos, event) {
+            // Plain click must place the caret — names are not links while drafting.
+            // ⌘/Ctrl-click opens the bible card.
+            if (!(event.metaKey || event.ctrlKey)) return false;
             const el = (event.target as HTMLElement | null)?.closest?.(
               "[data-mention-id]",
             ) as HTMLElement | null;
@@ -120,6 +123,7 @@ export const MentionHint = Extension.create<{
             const kind = el.getAttribute("data-mention-kind") as MentionKind | null;
             const label = el.getAttribute("data-mention-label") ?? "";
             if (!id || !kind) return false;
+            event.preventDefault();
             extension.options.onActivate?.({ kind, id, label });
             return true;
           },
