@@ -36,6 +36,7 @@ import { SceneInspector } from "@/components/SceneInspector/SceneInspector";
 import { SettingsDialog } from "@/components/Settings/SettingsDialog";
 import { Toolbar } from "@/components/Toolbar/Toolbar";
 import { WordCounter } from "@/components/WordCounter/WordCounter";
+import { WordToolsHost } from "@/components/Editor/WordToolsHost";
 import { SaveButton } from "@/components/SaveButton";
 import { Button } from "@/components/ui/button";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -599,6 +600,7 @@ export function WritingApp() {
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
       <BackupDialog open={backupOpen} onOpenChange={setBackupOpen} />
+      <WordToolsHost />
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

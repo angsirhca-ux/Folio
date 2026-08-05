@@ -44,7 +44,7 @@ const TABS: Array<{ icon: LucideIcon; label: string; blurb: string }> = [
     icon: BookOpen,
     label: "Manuscript",
     blurb:
-      "The prose itself. Chapters, scenes, and find & replace via Search → Manuscript (⌘F).",
+      "The prose itself. Chapters, scenes, spellcheck on right-click, thesaurus via ⌘⇧T, and find & replace via Search → Manuscript (⌘F).",
   },
   {
     icon: LayoutGrid,
@@ -160,6 +160,7 @@ const SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: "⌘ E", action: "Compile & export" },
   { keys: "⌘ ,", action: "Settings" },
   { keys: "⌘ /", action: "Formatting toolbar" },
+  { keys: "⌘ ⇧ T", action: "Thesaurus (synonyms for word)" },
   { keys: "⌘ ⇧ N", action: "Chapter notes" },
   { keys: "⌘ ⇧ M", action: "Scene details" },
   { keys: "⌘ ⇧ G", action: "Writing goals" },

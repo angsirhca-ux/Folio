@@ -59,6 +59,7 @@ export function SceneEditor({
       attributes: {
         class: "outline-none min-h-[14rem]",
         spellcheck: "true",
+        lang: "en",
       },
     },
     onUpdate: ({ editor: ed }) => {

@@ -115,6 +115,7 @@ export function ManuscriptEditor({
       attributes: {
         class: "outline-none",
         spellcheck: "true",
+        lang: "en",
       },
       handleDOMEvents: {
         focus: () => {

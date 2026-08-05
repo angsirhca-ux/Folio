@@ -561,22 +561,32 @@ export function useEncyclopediaDeepen(
 export async function indexManuscriptWithClaude(
   book: Book,
 ): Promise<{ index: import("@/lib/types").ManuscriptIndexData; passes: number }> {
-  const res = await fetch("/api/manuscript/index", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      book: {
-        title: book.title,
-        chapters: book.chapters,
-        characters: book.characters ?? [],
-        locations: book.locations ?? [],
-        research: book.research ?? [],
-        encyclopedia: book.encyclopedia ?? [],
-        chronicle: book.chronicle ?? [],
-        plotThreads: book.plotThreads ?? [],
-      },
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch("/api/manuscript/index", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        book: {
+          title: book.title,
+          chapters: book.chapters,
+          characters: book.characters ?? [],
+          locations: book.locations ?? [],
+          research: book.research ?? [],
+          encyclopedia: book.encyclopedia ?? [],
+          chronicle: book.chronicle ?? [],
+          plotThreads: book.plotThreads ?? [],
+        },
+      }),
+    });
+  } catch {
+    const desk = typeof window !== "undefined" && window.folioDesk?.isDesktop;
+    throw new Error(
+      desk
+        ? "Couldn’t reach Folio’s local server — quit Folio Desk and reopen it, then try again."
+        : "Network error talking to Clarence — check your connection and try again.",
+    );
+  }
   const data = (await res.json()) as {
     index?: import("@/lib/types").ManuscriptIndexData;
     passes?: number;

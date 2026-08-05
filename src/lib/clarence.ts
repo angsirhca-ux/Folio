@@ -18,9 +18,9 @@ export const CLARENCE = {
   applying: "Clarence is applying…",
   unavailable: "Clarence is offline",
   needsKey:
-    "Clarence needs an API key — add ANTHROPIC_API_KEY to .env.local",
+    "Clarence needs an API key — add ANTHROPIC_API_KEY to .env.local (or Folio Desk’s Application Support .env)",
   needsKeyHint:
-    "Clarence needs an API key — add ANTHROPIC_API_KEY to .env.local (see env.example), then restart the server.",
+    "Clarence needs an API key. Web: add ANTHROPIC_API_KEY to .env.local. Folio Desk.app: put it in ~/Library/Application Support/Folio Desk/.env, then restart the app.",
   draftingFlags: "Clarence is drafting flags — keep this panel open.",
   buildMapLabel: "Ask Clarence to map it",
   buildMapTitle:

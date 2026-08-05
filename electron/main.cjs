@@ -13,6 +13,7 @@ const {
   BrowserWindow,
   shell,
   Menu,
+  MenuItem,
   utilityProcess,
   ipcMain,
 } = require("electron");
@@ -227,6 +228,7 @@ function createWindow(url) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      spellcheck: true,
     },
   });
 
@@ -234,9 +236,113 @@ function createWindow(url) {
     mainWindow?.show();
   });
 
+  // Windows / Linux: prefer US English; macOS uses the system spellchecker.
+  if (process.platform !== "darwin") {
+    try {
+      const session = mainWindow.webContents.session;
+      const available = session.availableSpellCheckerLanguages || [];
+      const prefer = ["en-US", "en-GB", "en"].filter((code) =>
+        available.includes(code),
+      );
+      if (prefer.length) session.setSpellCheckerLanguages(prefer);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  mainWindow.webContents.on("context-menu", (_event, params) => {
+    const menu = new Menu();
+    let added = false;
+
+    for (const suggestion of params.dictionarySuggestions || []) {
+      menu.append(
+        new MenuItem({
+          label: suggestion,
+          click: () => {
+            mainWindow?.webContents.replaceMisspelling(suggestion);
+          },
+        }),
+      );
+      added = true;
+    }
+
+    if (params.misspelledWord) {
+      if (added) menu.append(new MenuItem({ type: "separator" }));
+      menu.append(
+        new MenuItem({
+          label: "Add to Dictionary",
+          click: () => {
+            mainWindow?.webContents.session.addWordToSpellCheckerDictionary(
+              params.misspelledWord,
+            );
+          },
+        }),
+      );
+      added = true;
+    }
+
+    const raw =
+      (params.selectionText || params.misspelledWord || "").trim().split(/\s+/)[0] ||
+      "";
+    const word = raw.replace(/^[^\p{L}\p{N}'’]+|[^\p{L}\p{N}'’]+$/gu, "");
+    if (word && params.isEditable) {
+      if (added) menu.append(new MenuItem({ type: "separator" }));
+      const labelWord = word.length > 28 ? `${word.slice(0, 28)}…` : word;
+      menu.append(
+        new MenuItem({
+          label: `Synonyms for “${labelWord}”`,
+          click: () => {
+            mainWindow?.webContents.send("folio:thesaurus", {
+              word,
+              x: params.x,
+              y: params.y,
+            });
+          },
+        }),
+      );
+      added = true;
+    }
+
+    if (params.isEditable) {
+      if (added) menu.append(new MenuItem({ type: "separator" }));
+      menu.append(new MenuItem({ role: "cut" }));
+      menu.append(new MenuItem({ role: "copy" }));
+      menu.append(new MenuItem({ role: "paste" }));
+      menu.append(new MenuItem({ type: "separator" }));
+      menu.append(new MenuItem({ role: "selectAll" }));
+      added = true;
+    } else if (params.selectionText) {
+      menu.append(new MenuItem({ role: "copy" }));
+      added = true;
+    }
+
+    if (added) {
+      menu.popup({
+        window: mainWindow ?? undefined,
+        frame: params.frame,
+      });
+    }
+  });
+
   mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
     shell.openExternal(target);
     return { action: "deny" };
+  });
+
+  // Keep the shell on the local Folio origin. Dropbox/Google OAuth runs in the
+  // system browser — if the window ever lands elsewhere, /api fetch breaks
+  // with "Failed to fetch".
+  mainWindow.webContents.on("will-navigate", (event, target) => {
+    if (!isAppUrl(target)) {
+      event.preventDefault();
+      shell.openExternal(target);
+    }
+  });
+
+  mainWindow.webContents.on("did-navigate", (_event, target) => {
+    if (!isAppUrl(target) && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(appOrigin);
+    }
   });
 
   const start = pendingDeepLink || url;
@@ -246,6 +352,22 @@ function createWindow(url) {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+}
+
+function isAppUrl(target) {
+  try {
+    const u = new URL(target);
+    if (u.protocol === "devtools:") return true;
+    const origin = `${u.protocol}//${u.host}`;
+    if (origin === appOrigin) return true;
+    // Dev desktop may use localhost vs 127.0.0.1
+    if (u.hostname === "127.0.0.1" || u.hostname === "localhost") {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function buildMenu() {
