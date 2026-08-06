@@ -7,6 +7,7 @@ import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Book } from "./types";
 import { scrollEditorPosIntoView } from "./editorNavigate";
+import { escapeRegExp, foldSearchChar } from "./textSearch";
 
 export type FindMatch = { from: number; to: number };
 
@@ -30,8 +31,11 @@ function flattenDoc(doc: ProseMirrorNode): {
   doc.descendants((node, pos) => {
     if (node.isText && node.text) {
       for (let i = 0; i < node.text.length; i++) {
-        map.push(pos + i);
-        text += node.text[i];
+        const folded = foldSearchChar(node.text[i]!);
+        for (let k = 0; k < folded.length; k++) {
+          map.push(pos + i);
+          text += folded[k];
+        }
       }
     } else if (node.isBlock && text.length > 0 && !text.endsWith("\n")) {
       map.push(pos);
@@ -42,8 +46,10 @@ function flattenDoc(doc: ProseMirrorNode): {
   return { text, map };
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function foldQuery(query: string): string {
+  let out = "";
+  for (const ch of query) out += foldSearchChar(ch);
+  return out;
 }
 
 function findInPlain(
@@ -51,9 +57,10 @@ function findInPlain(
   query: string,
   opts?: FindOptions,
 ): Array<{ from: number; to: number }> {
-  if (!query || !text) return [];
+  const q = foldQuery(query);
+  if (!q || !text) return [];
   const flags = opts?.matchCase ? "g" : "gi";
-  const re = new RegExp(escapeRegExp(query), flags);
+  const re = new RegExp(escapeRegExp(q), flags);
   const matches: Array<{ from: number; to: number }> = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
@@ -85,8 +92,8 @@ export function findMatchesInDoc(
     const end = p.to - 1;
     if (map[start] == null || map[end] == null) continue;
     matches.push({
-      from: map[start],
-      to: map[end] + 1,
+      from: map[start]!,
+      to: map[end]! + 1,
     });
   }
   return matches;
@@ -169,8 +176,11 @@ function flattenHtmlText(root: Node): {
   for (const node of walkTextNodes(root)) {
     const value = node.nodeValue ?? "";
     for (let i = 0; i < value.length; i++) {
-      map.push({ node, offset: i });
-      text += value[i];
+      const folded = foldSearchChar(value[i]!);
+      for (let k = 0; k < folded.length; k++) {
+        map.push({ node, offset: i });
+        text += folded[k];
+      }
     }
   }
   return { text, map };

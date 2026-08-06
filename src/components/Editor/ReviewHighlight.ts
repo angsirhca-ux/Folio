@@ -29,7 +29,8 @@ function buildDecorations(
   for (const item of items) {
     const range = findExcerptRange(doc, item.excerpt);
     if (!range) continue;
-    const key = `${range.from}:${range.to}`;
+    // Allow different flags on the same span; only skip exact dupes.
+    const key = `${item.id}:${range.from}:${range.to}`;
     if (used.has(key)) continue;
     used.add(key);
 

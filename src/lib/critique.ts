@@ -274,7 +274,7 @@ export const SMART_CRITIQUE_PACK: CritiquePack = {
   id: "smart",
   name: "Smart pack",
   blurb:
-    "Scene craft, fantasy worldbuilding, romance, and character arc — skip what doesn’t apply.",
+    "Broad craft checklist: scene mechanics, fantasy worldbuilding, romance beats, and character arc. Answers n/a when a section doesn’t apply.",
   questions: [
     ...SCENE_QUESTIONS,
     ...FANTASY_QUESTIONS,
@@ -286,7 +286,8 @@ export const SMART_CRITIQUE_PACK: CritiquePack = {
 export const PRESSURE_CRITIQUE_PACK: CritiquePack = {
   id: "pressure",
   name: "Pressure",
-  blurb: "Stakes, agency, causality, and chapter pull.",
+  blurb:
+    "Shorter heat-check: stakes, protagonist agency, cause-and-effect, and whether the chapter ending pulls the reader on.",
   questions: PRESSURE_QUESTIONS,
 };
 

@@ -6,11 +6,16 @@ import {
   buildReviewContext,
   chapterPassLabel,
   chapterToPlainText,
+  dedupeDevelopmentalFlags,
+  detectNarrativePerson,
+  narrativePersonLabel,
   normalizeReviewPayload,
   partitionChapterReviewWindows,
   reviewSystemPrompt,
   reviewToolForKind,
+  suggestionQualityRules,
   type ReviewPayload,
+  type ReviewTextWindow,
 } from "@/lib/developmentalEditor";
 import { asObjectArray } from "@/lib/asObjectArray";
 import {
@@ -22,20 +27,22 @@ import { createId } from "@/lib/utils";
 import type {
   Book,
   Chapter,
-  DevelopmentalFlag,
   DevelopmentalMemoryNote,
   DevelopmentalPassKind,
 } from "@/lib/types";
 
 export const runtime = "nodejs";
-/** Long chapters run several windowed Claude calls — allow up to 5 minutes. */
+/** One window (or a short chapter) should finish well under this. */
 export const maxDuration = 300;
 
 /** Coerce Claude tool JSON so flags/memoryUpdates are always arrays. */
 function coerceReviewPayload(raw: ReviewPayload): ReviewPayload {
   return {
     ...raw,
-    summary: typeof raw?.summary === "string" ? raw.summary : String(raw?.summary ?? ""),
+    summary:
+      typeof raw?.summary === "string"
+        ? raw.summary
+        : String(raw?.summary ?? ""),
     flags: asObjectArray(raw?.flags),
     memoryUpdates: asObjectArray(raw?.memoryUpdates),
   };
@@ -59,20 +66,13 @@ type ReviewBody = {
   memory?: DevelopmentalMemoryNote[];
   /** Prior passes for cross-chapter digests (same book). */
   passes?: Book["developmentalEditor"]["passes"];
+  /**
+   * When set, run only this window (preferred — client loops windows so each
+   * HTTP request stays under timeout). When omitted, server partitions and
+   * runs every window in one request (legacy / short chapters).
+   */
+  window?: ReviewTextWindow;
 };
-
-function dedupeFlags(flags: DevelopmentalFlag[]): DevelopmentalFlag[] {
-  const seen = new Set<string>();
-  const out: DevelopmentalFlag[] = [];
-  for (const f of flags) {
-    const key = `${f.category}:${f.excerpt.toLowerCase().slice(0, 96)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(f);
-    if (out.length >= MAX_FLAGS_PER_PASS) break;
-  }
-  return out;
-}
 
 function dedupeMemory(
   notes: DevelopmentalMemoryNote[],
@@ -154,20 +154,33 @@ export async function POST(request: Request) {
   };
 
   const passLabel = chapterPassLabel(body.kind);
-  const windows = partitionChapterReviewWindows(chapter);
+  const windows: ReviewTextWindow[] = body.window
+    ? [body.window]
+    : partitionChapterReviewWindows(chapter);
   const tool = reviewToolForKind(body.kind);
   const system = reviewSystemPrompt(body.kind);
+  const multi = (body.window?.total ?? windows.length) > 1;
+  const windowTotal = body.window?.total ?? windows.length;
+  // Detect person from the WHOLE chapter so later windows don't flip to third.
+  const narrativePerson = detectNarrativePerson(plain);
 
   try {
-    const allFlags: DevelopmentalFlag[] = [];
+    const allFlags = [];
     const summaries: string[] = [];
     const allMemory: DevelopmentalMemoryNote[] = [];
 
     for (const window of windows) {
-      const windowNote =
-        windows.length > 1
-          ? `WINDOW ${window.index + 1} of ${windows.length} — covering: ${window.label}. Flag ONLY issues whose excerpts appear in this window’s text. Soft max ~${Math.max(8, Math.ceil(MAX_FLAGS_PER_PASS / windows.length))} flags for this window.`
-          : undefined;
+      const windowParts = [
+        multi || windowTotal > 1
+          ? `WINDOW ${window.index + 1} of ${windowTotal} — covering: ${window.label}. Flag ONLY issues whose excerpts appear in this window’s text. Soft max ~${Math.max(8, Math.ceil(MAX_FLAGS_PER_PASS / Math.max(1, windowTotal)))} flags for this window.`
+          : "",
+        `NARRATIVE PERSON (whole chapter): ${narrativePersonLabel(narrativePerson)}. EXAMPLE suggestions must stay in this person — do not switch to third person if the chapter is first, or vice versa.`,
+        window.index > 0
+          ? `QUALITY LOCK: This is not the opening window. Keep DIRECTION + EXAMPLE as concrete and person-faithful as window 1. No generic “show more / deepen / reveal” padding.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       const context = buildReviewContext({
         book: bookSlice,
@@ -176,7 +189,8 @@ export async function POST(request: Request) {
         memory: body.memory ?? [],
         passes: body.passes ?? [],
         plainOverride: window.plain,
-        windowNote,
+        windowNote: windowParts || undefined,
+        narrativePerson,
       });
 
       const message = await client.messages.create({
@@ -189,8 +203,8 @@ export async function POST(request: Request) {
           {
             role: "user",
             content: `Run a ${passLabel} pass on the current chapter${
-              windows.length > 1
-                ? ` (window ${window.index + 1}/${windows.length})`
+              windowTotal > 1
+                ? ` (window ${window.index + 1}/${windowTotal})`
                 : ""
             }.
 
@@ -198,8 +212,9 @@ Remember:
 - Return discrete flags for specific moments (verbatim excerpts the author can find on the page).
 - Flag real issues — don’t drop problems to keep the list short. Soft max around ${MAX_FLAGS_PER_PASS} flags across the whole chapter; collapse identical repeats into representative moments.
 - A summary overview is fine, but flags are required whenever you notice issues — do not put everything only in the summary.
-- Give EXACTLY TWO suggestions per flag: (1) DIRECTION — a gentle craft steer; (2) EXAMPLE — a short illustrative sketch ("e.g. something like…") so the author can see what you mean. Specific beats beat vague verbs like "reveal" / "show". Never a full paste-ready rewrite.
 - Suggestions stay in this review only — never rewrite or insert into the manuscript.
+
+${suggestionQualityRules(narrativePerson)}
 
 ${context}`,
           },
@@ -211,8 +226,8 @@ ${context}`,
         return NextResponse.json(
           {
             error:
-              windows.length > 1
-                ? `Claude returned no structured review for window ${window.index + 1} of ${windows.length}. Try again.`
+              windowTotal > 1
+                ? `Claude returned no structured review for window ${window.index + 1} of ${windowTotal}. Try again.`
                 : "Claude returned no structured review payload.",
           },
           { status: 502 },
@@ -227,7 +242,7 @@ ${context}`,
       allFlags.push(...(Array.isArray(pass.flags) ? pass.flags : []));
       if (pass.summary.trim()) {
         summaries.push(
-          windows.length > 1
+          windowTotal > 1
             ? `[Part ${window.index + 1}] ${pass.summary.trim()}`
             : pass.summary.trim(),
         );
@@ -242,13 +257,14 @@ ${context}`,
       chapterTitle: chapter.title,
       createdAt: Date.now(),
       summary: summaries.join("\n\n").slice(0, 1600),
-      flags: dedupeFlags(allFlags),
+      flags: dedupeDevelopmentalFlags(allFlags),
     };
 
     return NextResponse.json({
       pass,
       memoryUpdates: dedupeMemory(allMemory),
-      windows: windows.length,
+      windows: windowTotal,
+      windowIndex: body.window?.index ?? 0,
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : "Unknown Anthropic error";

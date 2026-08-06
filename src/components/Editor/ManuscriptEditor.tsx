@@ -11,6 +11,7 @@ import { SceneBreak } from "@/components/Editor/SceneBreak";
 import { ReviewHighlight } from "@/components/Editor/ReviewHighlight";
 import type { ReviewHighlightItem } from "@/components/Editor/ReviewHighlight";
 import { ResumeMarker } from "@/components/Editor/ResumeMarker";
+import { FindHighlight } from "@/components/Editor/FindHighlight";
 import {
   MentionHint,
   type MentionActivate,
@@ -18,6 +19,7 @@ import {
 import type { MentionTerm } from "@/lib/mentionHints";
 import { focusEditorScene } from "@/lib/focusEditorScene";
 import { scrollEditorPosIntoView } from "@/lib/editorNavigate";
+import { extractChapterHeading } from "@/lib/chapterHeading";
 import { registerManuscriptPendingFlush } from "@/lib/manuscriptPendingFlush";
 import {
   clearResumePoint,
@@ -146,6 +148,7 @@ export function ManuscriptEditor({
       SceneBreak,
       ReviewHighlight,
       ResumeMarker,
+      FindHighlight,
       MentionHint.configure({
         onActivate: (hit) => onMentionRef.current?.(hit),
       }),
@@ -244,12 +247,24 @@ export function ManuscriptEditor({
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
     // While typing, TipTap is source of truth — don't reset the doc from React.
-    if (focusedRef.current || debounceRef.current != null || dirtyRef.current)
-      return;
+    // Exception: H1/title resync (e.g. Renumber) must win even while focused.
     if (content === latestHtmlRef.current) return;
+    const incomingHeading = extractChapterHeading(content);
+    const liveHeading = extractChapterHeading(latestHtmlRef.current);
+    const headingResync =
+      incomingHeading != null &&
+      incomingHeading !== "" &&
+      incomingHeading !== liveHeading;
+    if (
+      !headingResync &&
+      (focusedRef.current || debounceRef.current != null || dirtyRef.current)
+    ) {
+      return;
+    }
     applyingExternalRef.current = true;
     editor.commands.setContent(content, { emitUpdate: false });
     latestHtmlRef.current = content;
+    dirtyRef.current = false;
     applyingExternalRef.current = false;
     editor.commands.refreshMentionHints();
   }, [content, editor]);

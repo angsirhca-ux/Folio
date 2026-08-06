@@ -25,12 +25,29 @@ export const MAX_MEMORY_NOTES = 40;
 export const MAX_PASSES_KEPT = 24;
 /** Safety ceiling so a runaway response can’t hang the UI — not a “top 12 only” filter. */
 export const MAX_FLAGS_PER_PASS = 40;
-export const REVIEW_MAX_TOKENS = 8192;
+export const REVIEW_MAX_TOKENS = 6144;
 /**
  * Long chapters are reviewed in windows of this size so each Claude call
- * finishes before proxy timeouts (≈2–3k words per window).
+ * finishes within a single client request (~2k words per window).
  */
-export const REVIEW_WINDOW_CHARS = 14_000;
+export const REVIEW_WINDOW_CHARS = 10_000;
+
+/** Soft-dedupe flags by category + excerpt stem (shared by API + client). */
+export function dedupeDevelopmentalFlags(
+  flags: DevelopmentalFlag[],
+  max = MAX_FLAGS_PER_PASS,
+): DevelopmentalFlag[] {
+  const seen = new Set<string>();
+  const out: DevelopmentalFlag[] = [];
+  for (const f of flags) {
+    const key = `${f.category}:${f.excerpt.toLowerCase().slice(0, 96)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(f);
+    if (out.length >= max) break;
+  }
+  return out;
+}
 
 export function emptyDevelopmentalEditor(): DevelopmentalEditorState {
   return { memory: [], passes: [] };
@@ -171,6 +188,68 @@ export type ReviewTextWindow = {
   label: string;
   plain: string;
 };
+
+export type NarrativePerson = "first" | "second" | "third" | "mixed";
+
+/**
+ * Heuristic narrative person from a prose sample — used so EXAMPLE suggestions
+ * stay in the chapter’s grammatical person across review windows.
+ */
+export function detectNarrativePerson(plain: string): NarrativePerson {
+  const sample = plain.slice(0, 12_000);
+  // Prefer word-boundary pronouns outside obvious dialogue when possible;
+  // a simple count is enough for a strong prior.
+  const first =
+    (sample.match(/\bI\b/g) ?? []).length +
+    (sample.match(/\bme\b/gi) ?? []).length +
+    (sample.match(/\bmy\b/gi) ?? []).length +
+    (sample.match(/\bmyself\b/gi) ?? []).length;
+  const second =
+    (sample.match(/\byou\b/gi) ?? []).length +
+    (sample.match(/\byour\b/gi) ?? []).length;
+  const third =
+    (sample.match(/\bhe\b/gi) ?? []).length +
+    (sample.match(/\bshe\b/gi) ?? []).length +
+    (sample.match(/\bthey\b/gi) ?? []).length +
+    (sample.match(/\bhis\b/gi) ?? []).length +
+    (sample.match(/\bher\b/gi) ?? []).length +
+    (sample.match(/\btheir\b/gi) ?? []).length;
+
+  const total = first + second + third;
+  if (total < 8) return "mixed";
+
+  const firstShare = first / total;
+  const secondShare = second / total;
+  const thirdShare = third / total;
+
+  if (firstShare >= 0.45 && firstShare >= thirdShare && firstShare >= secondShare) {
+    return "first";
+  }
+  if (secondShare >= 0.4 && secondShare >= firstShare) return "second";
+  if (thirdShare >= 0.45 && thirdShare >= firstShare) return "third";
+  return "mixed";
+}
+
+export function narrativePersonLabel(person: NarrativePerson): string {
+  if (person === "first") return "FIRST PERSON (I / me / my)";
+  if (person === "second") return "SECOND PERSON (you / your)";
+  if (person === "third") return "THIRD PERSON (he / she / they)";
+  return "MIXED or unclear — match whatever person the flagged excerpt uses";
+}
+
+/** Reminder block injected into every review call (esp. later windows). */
+export function suggestionQualityRules(person: NarrativePerson): string {
+  const personLine = narrativePersonLabel(person);
+  return `SUGGESTION QUALITY (non-negotiable — same bar for every window of a long chapter):
+- Exactly TWO suggestions: [0] DIRECTION (perhaps/consider/try…) then [1] EXAMPLE (e.g. something like…).
+- EXAMPLE must be concrete (image, gesture, sensory detail, or short clause) — never vague verbs alone ("reveal", "show", "deepen", "make it more vivid").
+- EXAMPLE must match this chapter’s narrative person: ${personLine}.
+  If the chapter is first person, write examples as I/me/my (e.g. "e.g. something like: the blur resolved into wet black fur against my palms") — never switch to he/she for the narrator.
+  If the excerpt is dialogue, the example may use that speaker’s voice; narration examples follow the chapter person above.
+- Do not get generic or softer in later windows. Window 2+ must be as specific and person-faithful as window 1.
+- Bad: "Perhaps reveal it more directly." / "Consider showing the emotion."
+- Good: "Consider dropping the filter as my vision clears." / "e.g. something like: the blur resolved into wet black fur and too many joints."`;
+}
 
 function splitOversizedPlain(plain: string, maxChars: number): string[] {
   if (plain.length <= maxChars) return [plain];
@@ -713,10 +792,16 @@ export function buildReviewContext(args: {
   /** When reviewing a window of a long chapter. */
   plainOverride?: string;
   windowNote?: string;
+  /** Whole-chapter person prior (prefer over window-only detection). */
+  narrativePerson?: NarrativePerson;
 }): string {
   const plain =
     args.plainOverride?.trim() ||
     truncateChapterPlain(chapterToPlainText(args.chapter.content));
+  const fullPlain = chapterToPlainText(args.chapter.content ?? "");
+  const person =
+    args.narrativePerson ??
+    detectNarrativePerson(fullPlain || plain);
   const cast = (args.book.characters ?? [])
     .slice(0, 40)
     .map((c) => {
@@ -781,7 +866,10 @@ export function buildReviewContext(args: {
     args.book.author ? `Author: ${args.book.author}` : "",
     `Pass: ${chapterPassLabel(args.kind)}`,
     `Chapter under review ONLY: ${args.chapter.title}`,
+    `NARRATIVE PERSON for this chapter: ${narrativePersonLabel(person)}`,
     args.windowNote ? args.windowNote : "",
+    "",
+    suggestionQualityRules(person),
     "",
     "AUTHOR PREFERENCES (from ✓ liked / ✕ not useful on prior flags — respect tone; do not suppress real issues solely because of dislike):",
     preferencesBlock,
@@ -798,7 +886,7 @@ export function buildReviewContext(args: {
     cast ? `Cast roster (names only — for voice/consistency checks):\n${cast}` : "",
     places ? `Places (names only):\n${places}` : "",
     voiceBible
-      ? `\nCHARACTER VOICE BIBLE (from this book's wiki for POV/cast in this chapter — check dialogue/interiority against these notes; DIRECTION may ask a question, EXAMPLE may sketch a tiny sample beat — never a paste-ready monologue):\n${voiceBible}`
+      ? `\nCHARACTER VOICE BIBLE (from this book's wiki for POV/cast in this chapter — check dialogue/interiority against these notes; DIRECTION may ask a question, EXAMPLE may sketch a tiny sample beat in the correct narrative person — never a paste-ready monologue):\n${voiceBible}`
       : "",
     "",
     args.windowNote
@@ -821,8 +909,11 @@ HARD RULES:
 - Every flag needs: a short verbatim excerpt (a phrase or sentence the author can find on the page), a diagnostic note, and EXACTLY TWO suggestions with fixed roles:
   1) DIRECTION — one gentle craft steer (what to try / what to cut / what to lean on). Start with "perhaps…", "consider…", or "try…".
   2) EXAMPLE — one short illustrative sketch of how that direction might sound on the page (a clause or two, or a tiny beat). Frame it as a possibility ("e.g. something like…", "for instance…"), not as the author's new line. Specific sensory or action detail beats vague verbs like "reveal" or "show".
-- Bad suggestion pair: (1) "Perhaps reveal the creature directly." (2) "Consider cutting the preamble." — too oblique; no concrete picture.
-- Good suggestion pair: (1) "Consider dropping the filter and letting the creature arrive as her vision clears." (2) "e.g. something like: the blur resolved into wet black fur and too many joints."
+- EXAMPLE grammatical person MUST match the chapter (see NARRATIVE PERSON in the user context). First-person chapters get first-person examples; do not drift into third person mid-pass or in later windows.
+- When a long chapter is split into windows, keep the SAME specificity and person fidelity in every window — never go generic in the second half.
+- Bad suggestion pair: (1) "Perhaps reveal the creature directly." (2) "Consider cutting the preamble." — too oblique; no concrete picture; may also break person.
+- Good suggestion pair (1st person chapter): (1) "Consider dropping the filter and letting the creature arrive as my vision clears." (2) "e.g. something like: the blur resolved into wet black fur and too many joints."
+- Good suggestion pair (3rd person chapter): (1) "Consider dropping the filter and letting the creature arrive as her vision clears." (2) "e.g. something like: the blur resolved into wet black fur and too many joints."
 - Excerpts must be copy-pasteable from the chapter — specific enough to locate (prefer under ~120 characters).
 - Flag every concrete issue you find in this chapter (don’t omit real problems to keep the list short). If the same issue recurs, flag representative moments rather than every identical repeat.
 - Soft upper bound: about ${MAX_FLAGS_PER_PASS} flags if the chapter is packed — prioritize distinct moments over duplicates.
@@ -883,7 +974,7 @@ STORY & STRUCTURE — look only for:
 3. plot-holes — logic gaps, broken world rules (use memory + roster when helpful), or timeline slips visible in this chapter.
 4. character-voice — dialogue or interiority that collapses distinct characters into one voice, or drifts from the CHARACTER VOICE BIBLE when provided.
 
-For character-voice flags: DIRECTION may be a Socratic question ("Does this sound like her under pressure?"). EXAMPLE may be a tiny sample line or beat in their register, clearly marked as illustrative ("e.g. she might snap something shorter, like…") — never a paste-ready monologue rewrite.
+For character-voice flags: DIRECTION may be a Socratic question ("Does this sound like her under pressure?"). EXAMPLE may be a tiny sample line or beat in their register AND in the chapter’s narrative person, clearly marked as illustrative ("e.g. something like…") — never a paste-ready monologue rewrite.
 
 Pick every clear story/structure issue (soft cap ~${MAX_FLAGS_PER_PASS}). Use only the category ids above.
 
@@ -933,7 +1024,7 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
               suggestions: {
                 type: "array",
                 description:
-                  "Exactly two panel-only suggestions: [0] DIRECTION — gentle craft steer (perhaps/consider/try…). [1] EXAMPLE — short illustrative sketch of how that might look on the page (e.g. something like…), specific not oblique. Never paste-ready full rewrites.",
+                  "Exactly two panel-only suggestions: [0] DIRECTION — gentle craft steer (perhaps/consider/try…). [1] EXAMPLE — short concrete sketch (e.g. something like…) in the SAME narrative person as the chapter (first-person chapters → I/me/my examples). Specific not oblique. Never paste-ready full rewrites.",
                 items: { type: "string" },
                 minItems: 2,
                 maxItems: 2,

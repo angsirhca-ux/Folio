@@ -367,7 +367,7 @@ export function ChapterSidebar() {
               <button
                 type="button"
                 onClick={renumberChapters}
-                title="Retitle Chapter 1, Chapter 2, … to match the current order. Custom names are left alone."
+                title="Retitle Chapter One / Chapter 2 / Chapter III … to match the current order. Custom names are left alone."
                 className="flex items-center gap-2 rounded-md px-3 py-2.5 font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)] transition-colors duration-300 hover:bg-[var(--accent-soft)] hover:text-[var(--ink)]"
               >
                 <ListOrdered className="h-3.5 w-3.5" strokeWidth={1.5} />

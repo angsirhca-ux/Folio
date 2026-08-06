@@ -549,7 +549,13 @@ interface BookContextValue {
     review: BetaReview,
     memoryUpdates: BetaMemoryNote[],
   ) => void;
-  clearBetaMemory: () => void;
+  /** Clear beta memory. Omit args to clear the whole book; pass chapter/reader to scope. */
+  clearBetaMemory: (scope?: {
+    chapterId?: string;
+    readerId?: string;
+  }) => void;
+  /** Drop one reader’s review of a chapter (memory untouched). */
+  clearBetaReviewForChapter: (readerId: string, chapterId: string) => void;
   clearBetaReviews: () => void;
   /** Apply a critique checklist review. Never rewrites prose. */
   applyCritiqueReview: (
@@ -1353,12 +1359,28 @@ export function BookProvider({ children }: { children: ReactNode }) {
           return { ...b, activeChapterId: id, chapters };
         });
       },
-      renumberChapters: () =>
+      renumberChapters: () => {
+        const pending = flushManuscriptPending();
         updateBook((b) => {
-          const chapters = renumberNumberedChapters(b.chapters);
-          if (chapters === b.chapters) return b;
-          return { ...b, chapters };
-        }),
+          let chapters = b.chapters;
+          if (pending?.documentId && pending.html != null) {
+            chapters = chapters.map((c) =>
+              c.id === pending.documentId
+                ? {
+                    ...c,
+                    content: pending.html,
+                    title:
+                      extractChapterHeading(pending.html)?.trim() || c.title,
+                    updatedAt: Date.now(),
+                  }
+                : c,
+            );
+          }
+          const renumbered = renumberNumberedChapters(chapters);
+          if (renumbered === chapters) return b;
+          return { ...b, chapters: renumbered };
+        });
+      },
       deleteChapter: (chapterId) =>
         updateBook((b) => trashChapterFromBook(b, chapterId)),
       deleteManuscript: () => {
@@ -2859,14 +2881,48 @@ export function BookProvider({ children }: { children: ReactNode }) {
             memoryUpdates,
           ),
         })),
-      clearBetaMemory: () =>
-        updateBook((b) => ({
-          ...b,
-          betaReaders: {
-            ...(b.betaReaders ?? { readers: [], memory: [], reviews: [] }),
+      clearBetaMemory: (scope) =>
+        updateBook((b) => {
+          const beta = b.betaReaders ?? {
+            readers: [],
             memory: [],
-          },
-        })),
+            reviews: [],
+          };
+          if (!scope?.chapterId && !scope?.readerId) {
+            return { ...b, betaReaders: { ...beta, memory: [] } };
+          }
+          return {
+            ...b,
+            betaReaders: {
+              ...beta,
+              memory: (beta.memory ?? []).filter((m) => {
+                const readerMatch =
+                  !scope.readerId || m.readerId === scope.readerId;
+                const chapterMatch =
+                  !scope.chapterId || m.chapterId === scope.chapterId;
+                return !(readerMatch && chapterMatch);
+              }),
+            },
+          };
+        }),
+      clearBetaReviewForChapter: (readerId, chapterId) =>
+        updateBook((b) => {
+          const beta = b.betaReaders ?? {
+            readers: [],
+            memory: [],
+            reviews: [],
+          };
+          return {
+            ...b,
+            betaReaders: {
+              ...beta,
+              reviews: (beta.reviews ?? []).filter(
+                (r) =>
+                  !(r.readerId === readerId && r.chapterId === chapterId),
+              ),
+            },
+          };
+        }),
       clearBetaReviews: () =>
         updateBook((b) => ({
           ...b,

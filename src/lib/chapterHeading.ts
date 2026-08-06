@@ -82,10 +82,13 @@ function escapeHtml(text: string): string {
 }
 
 /** “Chapter 3”, “Chapter One”, “Chapter III — Dawn”, etc. */
-const NUMBERED_CHAPTER_RE =
-  /^(chapter)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|i{1,3}|iv|vi{0,3}|ix|x{1,3}|xi{0,3}|xiv|xv|xvi{0,3}|xix|xx)(\b|$)(.*)$/i;
+const CHAPTER_NUMBER_TOKEN =
+  "\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|xx|xix|xviii|xvii|xvi|xv|xiv|xiii|xii|xi|x|ix|viii|vii|vi|v|iv|iii|ii|i";
 
-const WORD_OR_ROMAN_OK = true; // documents intent for the regex above
+const NUMBERED_CHAPTER_RE = new RegExp(
+  `^chapter\\s+(${CHAPTER_NUMBER_TOKEN})\\b(.*)$`,
+  "i",
+);
 
 /**
  * If title looks like a numbered chapter, rewrite the number (keep any suffix).
@@ -96,28 +99,21 @@ export function applyChapterNumber(title: string, n: number): string | null {
   if (!trimmed) return null;
   const match = NUMBERED_CHAPTER_RE.exec(trimmed);
   if (!match) return null;
-  // match[3] is word-boundary group; suffix is match[4]
-  const suffix = (match[4] ?? "").replace(/^\s+/, (s) => s); // keep leading space/dash from original
-  // Normalize suffix spacing: " — Dawn" / " - Dawn" / " Dawn"
-  const normalizedSuffix = suffix.replace(/^\s*/, (lead) =>
-    lead.length ? (suffix.match(/^\s*[-–—:]/) ? suffix.replace(/^\s*/, " ") : suffix.startsWith(" ") ? suffix : ` ${suffix}`) : "",
-  );
-  void WORD_OR_ROMAN_OK;
-  void normalizedSuffix;
-  const cleanSuffix = suffix.match(/^\s*$/)
-    ? ""
-    : suffix.match(/^\s*[-–—:]/)
-      ? ` ${suffix.trim()}`
-      : suffix.startsWith(" ")
-        ? suffix
-        : ` ${suffix}`;
-  return `Chapter ${n}${cleanSuffix}`;
+  const rawSuffix = match[2] ?? "";
+  const suffix = rawSuffix.trim()
+    ? rawSuffix.match(/^\s*[-–—:]/)
+      ? ` ${rawSuffix.trim()}`
+      : rawSuffix.startsWith(" ")
+        ? rawSuffix
+        : ` ${rawSuffix.trim()}`
+    : "";
+  return `Chapter ${n}${suffix}`;
 }
 
 /**
- * Retitle “Chapter N …” entries to match list order, and sync each leading H1.
- * Accepts digits, English words (One…Twenty…), and light roman numerals.
- * Custom titles (anything not a numbered “Chapter …”) are unchanged.
+ * Retitle numbered “Chapter …” entries to match list order, and sync each H1.
+ * Accepts digits, English words (One…Twenty…), and roman numerals.
+ * Custom titles are left alone.
  */
 export function renumberNumberedChapters<
   T extends { title: string; content: string; updatedAt?: number },
@@ -127,14 +123,9 @@ export function renumberNumberedChapters<
   const next = chapters.map((chapter, index) => {
     const n = index + 1;
     const heading = extractChapterHeading(chapter.content);
-    const fromTitle = applyChapterNumber(chapter.title, n);
-    const fromHeading =
-      heading != null ? applyChapterNumber(heading, n) : null;
-
-    // Prefer rewriting when either the sidebar title or the page H1 is numbered
-    const newTitle = fromTitle ?? (fromHeading ? `Chapter ${n}${fromHeading.slice(`Chapter ${n}`.length)}` : null);
-    // fromHeading already is full "Chapter N…" — use it when title didn't match
-    const resolved = fromTitle ?? fromHeading;
+    const resolved =
+      applyChapterNumber(chapter.title, n) ??
+      (heading ? applyChapterNumber(heading, n) : null);
     if (!resolved) return chapter;
 
     const content = replaceChapterHeading(chapter.content, resolved);

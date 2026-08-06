@@ -4,6 +4,14 @@ import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, Loader2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useBook } from "@/providers/BookProvider";
 import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
 import { CLARENCE } from "@/lib/clarence";
@@ -91,6 +99,7 @@ export function BetaReadersPanel({
     activeChapter,
     applyBetaReview,
     clearBetaMemory,
+    clearBetaReviewForChapter,
     clearBetaReviews,
   } = useBook();
   const claude = useClaudeStatus();
@@ -133,6 +142,21 @@ export function BetaReadersPanel({
     [state, selected],
   );
 
+  const chapterMemoryCount = useMemo(
+    () =>
+      readerMemory.filter((m) => m.chapterId === activeChapter.id).length,
+    [readerMemory, activeChapter.id],
+  );
+
+  function clearThisChapterFresh() {
+    if (!selected) return;
+    clearBetaMemory({
+      readerId: selected.id,
+      chapterId: activeChapter.id,
+    });
+    clearBetaReviewForChapter(selected.id, activeChapter.id);
+  }
+
   async function runSelected() {
     if (!selected || busy) return;
     setBusy(true);
@@ -165,8 +189,12 @@ export function BetaReadersPanel({
           summary: activeChapter.summary ?? "",
         },
         reader: selected,
-        memory: readerMemory,
-        reviews: (state.reviews ?? []).filter((r) => r.readerId === selected.id),
+        // Prior chapters only — this chapter’s own notes would bias a re-read.
+        memory: readerMemory.filter((m) => m.chapterId !== activeChapter.id),
+        reviews: (state.reviews ?? []).filter(
+          (r) =>
+            r.readerId === selected.id && r.chapterId !== activeChapter.id,
+        ),
         signal: controller.signal,
       });
       applyBetaReview(next, memoryUpdates);
@@ -352,21 +380,62 @@ export function BetaReadersPanel({
               >
                 Memory ({readerMemory.length})
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Clear all beta-reader memory for this book?",
-                    )
-                  ) {
-                    clearBetaMemory();
-                  }
-                }}
-                className="ml-auto font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)] hover:text-[var(--ink-muted)]"
-              >
-                Clear memory
-              </button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="ml-auto inline-flex items-center gap-1 font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)] hover:text-[var(--ink-muted)]"
+                  >
+                    Clear memory
+                    <ChevronDown className="h-3 w-3" strokeWidth={1.5} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[14rem]">
+                  <DropdownMenuLabel>Clear memory</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    disabled={!selected}
+                    onSelect={() => {
+                      if (!selected) return;
+                      if (
+                        window.confirm(
+                          `Clear ${selected.name}’s memory notes from this chapter${review ? " and their review of it" : ""}? Prior chapters stay. Re-run for a fresh take.`,
+                        )
+                      ) {
+                        clearThisChapterFresh();
+                      }
+                    }}
+                  >
+                    <span className="flex flex-col gap-0.5 text-left">
+                      <span>This chapter</span>
+                      <span className="text-[0.7rem] font-normal text-[var(--ink-faint)]">
+                        {selected
+                          ? `${selected.name} · ${chapterMemoryCount} note${chapterMemoryCount === 1 ? "" : "s"} here`
+                          : "Pick a reader first"}
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    destructive
+                    onSelect={() => {
+                      if (
+                        window.confirm(
+                          "Clear all beta-reader memory for this book?",
+                        )
+                      ) {
+                        clearBetaMemory();
+                      }
+                    }}
+                  >
+                    <span className="flex flex-col gap-0.5 text-left">
+                      <span>Entire book</span>
+                      <span className="text-[0.7rem] font-normal text-[var(--ink-faint)]">
+                        All readers · all chapters
+                      </span>
+                    </span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             <div className="folio-scroll min-h-0 flex-1 overflow-y-auto px-5 py-5">
@@ -385,6 +454,11 @@ export function BetaReadersPanel({
                       >
                         <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
                           {m.kind}
+                          {m.chapterId === activeChapter.id
+                            ? " · this chapter"
+                            : m.chapterId
+                              ? " · earlier"
+                              : ""}
                         </p>
                         <p className="mt-1 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
                           {m.text}

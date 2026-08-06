@@ -57,6 +57,20 @@ export const SceneBreak = Node.create({
     ];
   },
 
+  addNodeView() {
+    return () => {
+      const dom = document.createElement("p");
+      dom.className = "scene-break";
+      dom.setAttribute("data-type", "scene-break");
+      dom.setAttribute("contenteditable", "false");
+      dom.textContent = "* * *";
+      return {
+        dom,
+        // Atom — no editable content DOM
+      };
+    };
+  },
+
   addCommands() {
     return {
       setSceneBreak:

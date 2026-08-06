@@ -264,11 +264,22 @@ body {
   text-indent: 0;
 }
 
-.scene-break {
+/* Scene break ornaments — flex + optical padding so letter-spacing
+   doesn’t leave “* * *” sitting left of true center. */
+.manuscript-editor .ProseMirror p.scene-break,
+.manuscript-editor .ProseMirror [data-type="scene-break"],
+.manuscript-editor .ProseMirror > p.scene-break {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center;
+  width: 100%;
   text-align: center !important;
   text-align-last: center !important;
   text-indent: 0 !important;
   letter-spacing: 0.45em;
+  /* letter-spacing adds space after the last glyph — pad the start to balance */
+  padding-left: 0.45em !important;
+  padding-right: 0 !important;
   color: var(--ink-muted);
   margin: 1.6em 0 !important;
   font-family: var(--font-display);
@@ -276,7 +287,8 @@ body {
   cursor: default;
 }
 
-.scene-break.ProseMirror-selectednode {
+.manuscript-editor .ProseMirror p.scene-break.ProseMirror-selectednode,
+.manuscript-editor .ProseMirror [data-type="scene-break"].ProseMirror-selectednode {
   outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   outline-offset: 6px;
   border-radius: 2px;
@@ -294,6 +306,19 @@ body {
 .manuscript-editor .review-highlight-active {
   background: rgba(232, 214, 140, 0.48);
   box-shadow: inset 0 -1px 0 rgba(196, 168, 72, 0.35);
+}
+
+/* Find & replace — visible even while the search field holds focus */
+.manuscript-editor .find-highlight {
+  background: rgba(176, 141, 87, 0.22);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.manuscript-editor .find-highlight-active {
+  background: rgba(176, 141, 87, 0.42);
+  box-shadow: inset 0 -1px 0 rgba(140, 108, 58, 0.35);
 }
 
 /* Leave-off marker — muted red caret after tab switch / sleep / navigate away */

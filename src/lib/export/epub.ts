@@ -81,9 +81,13 @@ blockquote p {
 }
 
 .scene-break {
+  display: flex;
+  justify-content: center;
+  align-items: center;
   text-align: center;
   text-indent: 0 !important;
   letter-spacing: 0.4em;
+  padding-left: 0.4em;
   margin: 2em 0 !important;
   color: #6b645c;
 }

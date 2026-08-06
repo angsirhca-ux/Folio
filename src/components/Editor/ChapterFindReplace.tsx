@@ -93,13 +93,44 @@ export function ChapterFindReplace({
     setIndex((i) => Math.min(i, matches.length - 1));
   }, [matches.length]);
 
+  // Paint find marks in the open chapter (visible while the search input is focused).
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    if (!active || !query.trim()) {
+      editor.commands.clearFindHighlights();
+      return;
+    }
+    const locals = findMatchesInDoc(editor.state.doc, query, { matchCase });
+    // Active index among matches that belong to this chapter
+    let activeLocal = 0;
+    if (current && current.chapterId === activeChapter.id) {
+      activeLocal = current.localIndex;
+    }
+    editor.commands.setFindHighlights(locals, activeLocal);
+    return () => {
+      if (!editor.isDestroyed) editor.commands.clearFindHighlights();
+    };
+  }, [
+    editor,
+    active,
+    query,
+    matchCase,
+    matches,
+    current,
+    activeChapter.id,
+    tick,
+  ]);
+
   function revealMatch(match: DraftFindMatch) {
     const goSelect = () => {
       if (!editor || editor.isDestroyed) return;
       if (activeChapter.id !== match.chapterId) return;
       const locals = findMatchesInDoc(editor.state.doc, query, { matchCase });
       const local = locals[match.localIndex];
-      if (local) selectMatch(editor, local);
+      if (local) {
+        selectMatch(editor, local);
+        editor.commands.setFindHighlights(locals, match.localIndex);
+      }
     };
 
     if (match.chapterId !== activeChapter.id) {

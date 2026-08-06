@@ -1,6 +1,7 @@
 import type { Editor } from "@tiptap/react";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
+import { escapeRegExp, foldSearchChar } from "@/lib/textSearch";
 
 function flattenDoc(doc: ProseMirrorNode): {
   text: string;
@@ -12,8 +13,11 @@ function flattenDoc(doc: ProseMirrorNode): {
   doc.descendants((node, pos) => {
     if (node.isText && node.text) {
       for (let i = 0; i < node.text.length; i++) {
-        map.push(pos + i);
-        text += node.text[i];
+        const folded = foldSearchChar(node.text[i]!);
+        for (let k = 0; k < folded.length; k++) {
+          map.push(pos + i);
+          text += folded[k];
+        }
       }
     } else if (node.isBlock && text.length > 0 && !text.endsWith("\n")) {
       map.push(pos);
@@ -24,29 +28,48 @@ function flattenDoc(doc: ProseMirrorNode): {
   return { text, map };
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function excerptCandidates(raw: string): string[] {
+  const cleaned = raw.replace(/\s+/g, " ").trim();
+  if (!cleaned) return [];
+
+  const folded = cleaned
+    .split("")
+    .map((c) => foldSearchChar(c))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const bases = [folded, cleaned].filter(
+    (c, i, arr) => c.length >= 2 && arr.indexOf(c) === i,
+  );
+
+  const out: string[] = [];
+  for (const base of bases) {
+    out.push(base);
+    // Drop wrapping quotes/punctuation that Claude sometimes adds
+    const stripped = base.replace(/^["'`“”‘’]+|["'`“”‘’.,;:!?]+$/g, "").trim();
+    if (stripped.length >= 2) out.push(stripped);
+    const lengths = [base.length, 96, 64, 40, 24, 16];
+    for (const len of lengths) {
+      if (base.length > len) out.push(base.slice(0, len).trim());
+    }
+  }
+
+  return out.filter((c, i, arr) => c.length >= 2 && arr.indexOf(c) === i);
 }
 
-/** Locate an AI-flag excerpt in the ProseMirror doc (whitespace-tolerant). */
+/** Locate an AI-flag excerpt in the ProseMirror doc (whitespace + punctuation tolerant). */
 export function findExcerptRange(
   doc: ProseMirrorNode,
   excerpt: string,
 ): { from: number; to: number } | null {
   const raw = excerpt.replace(/\s+/g, " ").trim();
-  if (raw.length < 4) return null;
+  if (raw.length < 2) return null;
 
   const { text, map } = flattenDoc(doc);
   if (!text) return null;
 
-  const candidates = [
-    raw,
-    raw.slice(0, Math.min(80, raw.length)),
-    raw.slice(0, Math.min(48, raw.length)),
-    raw.slice(0, Math.min(28, raw.length)),
-  ].filter((c, i, arr) => c.length >= 4 && arr.indexOf(c) === i);
-
-  for (const candidate of candidates) {
+  for (const candidate of excerptCandidates(raw)) {
     const pattern = escapeRegExp(candidate).replace(/\\ /g, "\\s+");
     const re = new RegExp(pattern, "i");
     const match = re.exec(text);
@@ -57,8 +80,8 @@ export function findExcerptRange(
       continue;
     }
     return {
-      from: map[start],
-      to: map[Math.min(end, map.length - 1)] + 1,
+      from: map[start]!,
+      to: map[Math.min(end, map.length - 1)]! + 1,
     };
   }
 
@@ -146,7 +169,6 @@ export function focusEditorExcerpt(
 
   requestAnimationFrame(() => {
     scrollEditorPosIntoView(editor, range.from);
-    // Second pass after layout (panel padding / highlight paint).
     window.setTimeout(() => scrollEditorPosIntoView(editor, range.from), 80);
   });
 

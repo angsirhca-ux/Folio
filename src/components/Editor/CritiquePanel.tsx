@@ -15,6 +15,7 @@ import { useBook } from "@/providers/BookProvider";
 import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
 import { CLARENCE } from "@/lib/clarence";
 import {
+  PRESSURE_CRITIQUE_PACK,
   SMART_CRITIQUE_PACK,
   groupCritiqueItems,
   latestCritiqueReview,
@@ -257,6 +258,9 @@ export function CritiquePanel({
                   <span className="mt-0.5 block truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
                     Smart pack · Pressure
                   </span>
+                  <span className="mt-0.5 block truncate font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-faint)]">
+                    Broad craft checklist · stakes & pace heat-check
+                  </span>
                 </span>
                 <ChevronDown
                   className={cn(
@@ -283,47 +287,71 @@ export function CritiquePanel({
                       this bar to read the full checklist.
                     </p>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={busy || claude?.configured === false}
-                        onClick={() => void runPack("smart")}
-                        className="gap-1.5"
-                      >
-                        {busyPack === "smart" ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <ClipboardCheck
-                            className="h-3.5 w-3.5"
-                            strokeWidth={1.5}
-                          />
-                        )}
-                        {busyPack === "smart"
-                          ? `Smart pack…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
-                          : smartReview
-                            ? "Re-run smart pack"
-                            : "Smart pack"}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={busy || claude?.configured === false}
-                        onClick={() => void runPack("pressure")}
-                        className="gap-1.5"
-                      >
-                        {busyPack === "pressure" ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Gauge className="h-3.5 w-3.5" strokeWidth={1.5} />
-                        )}
-                        {busyPack === "pressure"
-                          ? `Pressure…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
-                          : pressureReview
-                            ? "Re-run pressure"
-                            : "Pressure"}
-                      </Button>
+                    <div className="mt-3 space-y-3">
+                      <div className="rounded-xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.35)] px-3 py-2.5">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                              {SMART_CRITIQUE_PACK.name}
+                            </p>
+                            <p className="mt-0.5 font-[family-name:var(--font-ui)] text-[0.7rem] leading-relaxed text-[var(--ink-muted)]">
+                              {SMART_CRITIQUE_PACK.blurb}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={busy || claude?.configured === false}
+                            onClick={() => void runPack("smart")}
+                            className="gap-1.5 shrink-0"
+                          >
+                            {busyPack === "smart" ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ClipboardCheck
+                                className="h-3.5 w-3.5"
+                                strokeWidth={1.5}
+                              />
+                            )}
+                            {busyPack === "smart"
+                              ? `Running…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
+                              : smartReview
+                                ? "Re-run"
+                                : "Run"}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.35)] px-3 py-2.5">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                              {PRESSURE_CRITIQUE_PACK.name}
+                            </p>
+                            <p className="mt-0.5 font-[family-name:var(--font-ui)] text-[0.7rem] leading-relaxed text-[var(--ink-muted)]">
+                              {PRESSURE_CRITIQUE_PACK.blurb}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={busy || claude?.configured === false}
+                            onClick={() => void runPack("pressure")}
+                            className="gap-1.5 shrink-0"
+                          >
+                            {busyPack === "pressure" ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Gauge className="h-3.5 w-3.5" strokeWidth={1.5} />
+                            )}
+                            {busyPack === "pressure"
+                              ? `Running…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
+                              : pressureReview
+                                ? "Re-run"
+                                : "Run"}
+                          </Button>
+                        </div>
+                      </div>
                     </div>
 
                     {claude?.configured === false ? (
@@ -431,6 +459,9 @@ export function CritiquePanel({
                       ? "No smart-pack critique for this chapter yet."
                       : "No pressure run for this chapter yet."}
                   </p>
+                  <p className="mx-auto mt-2 max-w-[18rem] font-[family-name:var(--font-ui)] text-[0.7rem] leading-relaxed text-[var(--ink-faint)]">
+                    {viewPack.blurb}
+                  </p>
                   {!runsOpen ? (
                     <button
                       type="button"
@@ -446,6 +477,9 @@ export function CritiquePanel({
                   <div>
                     <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
                       {viewPack.name} · {formatRelativeDate(review.createdAt)}
+                    </p>
+                    <p className="mt-1 font-[family-name:var(--font-ui)] text-[0.7rem] leading-relaxed text-[var(--ink-faint)]">
+                      {viewPack.blurb}
                     </p>
                     <p className="mt-2 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
                       {review.summary}

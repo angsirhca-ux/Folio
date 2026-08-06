@@ -317,8 +317,10 @@ export function FolioHowToDialog({
               </p>
               <p>
                 <span className="text-[var(--ink)]">Critique</span> — genre
-                checklists (smart pack and pressure). Verdicts and notes only —
-                still no prose rewrites.
+                checklists. <em>Smart pack</em> covers scene craft, fantasy,
+                romance, and arc (skips what doesn’t apply). <em>Pressure</em>{" "}
+                is a short heat-check on stakes, agency, causality, and chapter
+                pull. Verdicts and notes only — still no prose rewrites.
               </p>
             </div>
           </Section>

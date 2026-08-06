@@ -22,10 +22,14 @@ import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
 import { CLARENCE } from "@/lib/clarence";
 import {
   appendPrivateNote,
+  dedupeDevelopmentalFlags,
   formatTryNextPin,
   latestPassForChapter,
+  partitionChapterReviewWindows,
   splitEditorMemory,
+  type ReviewTextWindow,
 } from "@/lib/developmentalEditor";
+import { createId, cn } from "@/lib/utils";
 import { focusEditorExcerpt } from "@/lib/editorNavigate";
 import { formatRelativeDate } from "@/lib/scenes";
 import {
@@ -36,26 +40,36 @@ import {
   type DevelopmentalPassKind,
   type DevelopmentalSeverity,
   type DevelopmentalFlag,
+  type Scene,
 } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
-async function reviewChapter(
+/** Per-window timeout — long enough for one Claude tool call. */
+const AI_WINDOW_TIMEOUT_MS = 210_000;
+/** Continuity is one big call — allow up to ~8 minutes. */
+const AI_CONTINUITY_TIMEOUT_MS = 480_000;
+
+type ReviewBookSlice = {
+  title: string;
+  author: string;
+  characters: unknown[];
+  locations: unknown[];
+  chapters: unknown[];
+};
+
+type ReviewChapterSlice = {
+  id: string;
+  title: string;
+  content: string;
+  scenes: unknown[];
+};
+
+async function reviewChapterWindow(
   kind: "style" | "story" | "action",
-  book: {
-    title: string;
-    author: string;
-    characters: unknown[];
-    locations: unknown[];
-    chapters: unknown[];
-  },
-  chapter: {
-    id: string;
-    title: string;
-    content: string;
-    scenes: unknown[];
-  },
+  book: ReviewBookSlice,
+  chapter: ReviewChapterSlice,
   memory: DevelopmentalMemoryNote[],
   passes: DevelopmentalPass[],
+  reviewWindow: ReviewTextWindow,
   signal?: AbortSignal,
 ): Promise<{
   pass: DevelopmentalPass;
@@ -64,7 +78,14 @@ async function reviewChapter(
   const res = await fetch("/api/editor/review", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ kind, book, chapter, memory, passes }),
+    body: JSON.stringify({
+      kind,
+      book,
+      chapter,
+      memory,
+      passes,
+      window: reviewWindow,
+    }),
     signal,
   });
   const data = (await res.json()) as {
@@ -78,6 +99,88 @@ async function reviewChapter(
   return {
     pass: data.pass,
     memoryUpdates: data.memoryUpdates ?? [],
+  };
+}
+
+async function reviewChapter(
+  kind: "style" | "story" | "action",
+  book: ReviewBookSlice,
+  chapter: ReviewChapterSlice,
+  memory: DevelopmentalMemoryNote[],
+  passes: DevelopmentalPass[],
+  onWindow?: (info: { index: number; total: number; label: string }) => void,
+  outerSignal?: AbortSignal,
+): Promise<{
+  pass: DevelopmentalPass;
+  memoryUpdates: DevelopmentalMemoryNote[];
+}> {
+  const windows = partitionChapterReviewWindows({
+    title: chapter.title,
+    content: chapter.content,
+    scenes: (chapter.scenes ?? []) as Scene[],
+  });
+
+  const allFlags: DevelopmentalFlag[] = [];
+  const summaries: string[] = [];
+  const allMemory: DevelopmentalMemoryNote[] = [];
+
+  for (const reviewWindow of windows) {
+    if (outerSignal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
+    onWindow?.({
+      index: reviewWindow.index,
+      total: reviewWindow.total,
+      label: reviewWindow.label,
+    });
+
+    const controller = new AbortController();
+    const onOuterAbort = () => controller.abort();
+    outerSignal?.addEventListener("abort", onOuterAbort);
+    const timeoutId = globalThis.setTimeout(
+      () => controller.abort(),
+      AI_WINDOW_TIMEOUT_MS,
+    );
+    try {
+      const { pass, memoryUpdates } = await reviewChapterWindow(
+        kind,
+        book,
+        chapter,
+        memory,
+        passes,
+        reviewWindow,
+        controller.signal,
+      );
+      allFlags.push(...(Array.isArray(pass.flags) ? pass.flags : []));
+      if (pass.summary.trim()) summaries.push(pass.summary.trim());
+      allMemory.push(...(memoryUpdates ?? []));
+    } finally {
+      globalThis.clearTimeout(timeoutId);
+      outerSignal?.removeEventListener("abort", onOuterAbort);
+    }
+  }
+
+  const seenMem = new Set<string>();
+  const memoryUpdates = allMemory
+    .filter((n) => {
+      const key = n.text.toLowerCase().slice(0, 120);
+      if (seenMem.has(key)) return false;
+      seenMem.add(key);
+      return true;
+    })
+    .slice(0, 12);
+
+  return {
+    pass: {
+      id: createId(),
+      kind,
+      chapterId: chapter.id,
+      chapterTitle: chapter.title,
+      createdAt: Date.now(),
+      summary: summaries.join("\n\n").slice(0, 1600),
+      flags: dedupeDevelopmentalFlags(allFlags),
+    },
+    memoryUpdates,
   };
 }
 
@@ -123,12 +226,9 @@ async function reviewContinuity(
   };
 }
 
-/** Client aborts before typical proxy/server ceilings so we can show a clear error. */
-const AI_FETCH_TIMEOUT_MS = 280_000;
-
 function aiAbortErrorMessage(err: unknown): string {
   if (err instanceof DOMException && err.name === "AbortError") {
-    return "That pass took too long and was stopped. Long chapters can take a few minutes — try again, or split the chapter with scene breaks.";
+    return "That part of the pass took too long and was stopped. Try again — long chapters run in smaller pieces now, so a second attempt often finishes.";
   }
   if (err instanceof Error) return err.message;
   return "Review failed.";
@@ -180,6 +280,7 @@ export function DevelopmentalPanel({
   const claude = useClaudeStatus();
   const [busyKind, setBusyKind] = useState<DevelopmentalPassKind | null>(null);
   const [busyElapsedSec, setBusyElapsedSec] = useState(0);
+  const [busyProgress, setBusyProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const viewKind = passKind;
   const setViewKind = onPassKindChange;
@@ -280,15 +381,19 @@ export function DevelopmentalPanel({
     async (kind: DevelopmentalPassKind) => {
       setBusyKind(kind);
       setBusyElapsedSec(0);
+      setBusyProgress(null);
       setError(null);
       setViewKind(kind);
       setPassesOpen(true);
       setShowMemory(false);
       const controller = new AbortController();
-      const timeout = window.setTimeout(
-        () => controller.abort(),
-        AI_FETCH_TIMEOUT_MS,
-      );
+      const timeout =
+        kind === "continuity"
+          ? window.setTimeout(
+              () => controller.abort(),
+              AI_CONTINUITY_TIMEOUT_MS,
+            )
+          : null;
       const tick = window.setInterval(() => {
         setBusyElapsedSec((s) => s + 1);
       }, 1000);
@@ -339,6 +444,11 @@ export function DevelopmentalPanel({
             },
             editorState.memory,
             editorState.passes ?? [],
+            ({ index, total }) => {
+              setBusyProgress(
+                total > 1 ? `Part ${index + 1} of ${total}` : null,
+              );
+            },
             controller.signal,
           );
           applyDevelopmentalReview(pass, memoryUpdates);
@@ -347,10 +457,11 @@ export function DevelopmentalPanel({
       } catch (e) {
         setError(aiAbortErrorMessage(e));
       } finally {
-        window.clearTimeout(timeout);
+        if (timeout != null) window.clearTimeout(timeout);
         window.clearInterval(tick);
         setBusyKind(null);
         setBusyElapsedSec(0);
+        setBusyProgress(null);
       }
     },
     [
@@ -367,6 +478,7 @@ export function DevelopmentalPanel({
       activeChapter.content,
       activeChapter.scenes,
       editorState.memory,
+      editorState.passes,
       applyDevelopmentalReview,
     ],
   );
@@ -490,6 +602,7 @@ export function DevelopmentalPanel({
                         }
                         busy={busyKind === "style"}
                         elapsedSec={busyKind === "style" ? busyElapsedSec : 0}
+                        progress={busyKind === "style" ? busyProgress : null}
                         disabled={
                           busyKind != null || claude?.configured === false
                         }
@@ -503,6 +616,7 @@ export function DevelopmentalPanel({
                         }
                         busy={busyKind === "story"}
                         elapsedSec={busyKind === "story" ? busyElapsedSec : 0}
+                        progress={busyKind === "story" ? busyProgress : null}
                         disabled={
                           busyKind != null || claude?.configured === false
                         }
@@ -516,6 +630,7 @@ export function DevelopmentalPanel({
                         }
                         busy={busyKind === "action"}
                         elapsedSec={busyKind === "action" ? busyElapsedSec : 0}
+                        progress={busyKind === "action" ? busyProgress : null}
                         disabled={
                           busyKind != null || claude?.configured === false
                         }
@@ -534,6 +649,7 @@ export function DevelopmentalPanel({
                         elapsedSec={
                           busyKind === "continuity" ? busyElapsedSec : 0
                         }
+                        progress={null}
                         disabled={
                           busyKind != null || claude?.configured === false
                         }
@@ -955,6 +1071,7 @@ function PassButton({
   icon,
   busy,
   elapsedSec = 0,
+  progress = null,
   disabled,
   configured,
   onClick,
@@ -963,6 +1080,7 @@ function PassButton({
   icon: React.ReactNode;
   busy: boolean;
   elapsedSec?: number;
+  progress?: string | null;
   disabled: boolean;
   configured: boolean | null;
   onClick: () => void;
@@ -996,7 +1114,7 @@ function PassButton({
           {busy
             ? kind === "continuity"
               ? `Reading the whole book…${elapsedSec ? ` ${elapsedSec}s` : ""}`
-              : `Reading this chapter…${elapsedSec ? ` ${elapsedSec}s` : ""}`
+              : `${progress ? `${progress} · ` : ""}Reading this chapter…${elapsedSec ? ` ${elapsedSec}s` : ""}`
             : meta.label}
         </span>
         <span className="mt-0.5 block font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-faint)]">
