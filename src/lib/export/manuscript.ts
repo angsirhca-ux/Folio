@@ -170,7 +170,7 @@ export function chapterToXhtmlBody(
         parts.push(`<p class="scene-break scene-break-blank">&#160;</p>`);
       } else {
         parts.push(
-          `<p class="scene-break">${escapeXml(block.text || "* * *")}</p>`,
+          `<p class="scene-break"><span class="scene-break-mark">${escapeXml(block.text || "* * *")}</span></p>`,
         );
       }
     } else if (block.type === "blockquote") {

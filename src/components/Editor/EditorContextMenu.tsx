@@ -290,7 +290,18 @@ function MenuButton({
       type="button"
       role="menuitem"
       disabled={disabled}
-      onClick={onClick}
+      onPointerDown={(e) => {
+        // Keep the manuscript selection / TipTap range until we replace.
+        if (disabled) return;
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onClick={(e) => {
+        if (disabled) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onClick();
+      }}
       className={cn(
         "flex w-full rounded-lg px-4 py-2 text-left font-[family-name:var(--font-ui)] text-sm transition-colors",
         muted ? "text-[var(--ink-muted)]" : "text-[var(--ink)]",

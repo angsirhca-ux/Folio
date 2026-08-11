@@ -81,19 +81,23 @@ blockquote p {
 }
 
 .scene-break {
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  display: block;
   text-align: center;
+  text-align-last: center;
   text-indent: 0 !important;
-  letter-spacing: 0.4em;
-  padding-left: 0.4em;
+  letter-spacing: normal;
   margin: 2em 0 !important;
   color: #6b645c;
 }
 
+.scene-break .scene-break-mark {
+  display: inline-block;
+  letter-spacing: 0.55em;
+  margin-right: -0.55em;
+}
+
 .scene-break-blank {
-  letter-spacing: 0;
+  letter-spacing: normal;
   margin: 1.25em 0 !important;
   color: transparent;
 }

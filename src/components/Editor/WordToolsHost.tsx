@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useManuscriptEditor } from "@/providers/ManuscriptEditorContext";
 import {
+  matchReplacementCase,
   normalizeLookupWord,
   replaceEditorRange,
   wordAtEditorCoords,
@@ -28,6 +29,12 @@ export function WordToolsHost() {
   const [error, setError] = useState<string | null>(null);
   const [synonyms, setSynonyms] = useState<ThesaurusHit[]>([]);
   const [related, setRelated] = useState<ThesaurusHit[]>([]);
+  /** Stable span for replace — survives focus steal before click. */
+  const replaceSpanRef = useRef<{
+    from: number;
+    to: number;
+    word: string;
+  } | null>(null);
 
   const closeMenu = useCallback(() => {
     setMenu(null);
@@ -36,6 +43,7 @@ export function WordToolsHost() {
     setSynonyms([]);
     setRelated([]);
     setLoading(false);
+    replaceSpanRef.current = null;
   }, []);
 
   const fetchThesaurus = useCallback(async (word: string) => {
@@ -83,6 +91,16 @@ export function WordToolsHost() {
     [editor],
   );
 
+  const rememberSpan = useCallback(
+    (span: { word: string; from: number; to: number } | null) => {
+      replaceSpanRef.current =
+        span && span.from < span.to
+          ? { from: span.from, to: span.to, word: span.word }
+          : null;
+    },
+    [],
+  );
+
   const openMenuFromPayload = useCallback(
     (payload: {
       x: number;
@@ -94,6 +112,7 @@ export function WordToolsHost() {
       word?: string;
     }) => {
       const span = resolveSpan(payload);
+      rememberSpan(span);
       const word =
         span?.word ||
         normalizeLookupWord(payload.word || "") ||
@@ -124,7 +143,7 @@ export function WordToolsHost() {
         hasSelection,
       });
     },
-    [editor, resolveSpan],
+    [editor, rememberSpan, resolveSpan],
   );
 
   // ⌘⇧T — open menu on the word and expand synonyms
@@ -137,6 +156,7 @@ export function WordToolsHost() {
       e.preventDefault();
       const span = wordAtEditorSelection(editor);
       if (!span) return;
+      rememberSpan(span);
       const coords = editor.view.coordsAtPos(span.from);
       setMenu({
         x: coords.left,
@@ -153,7 +173,7 @@ export function WordToolsHost() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, fetchThesaurus]);
+  }, [editor, fetchThesaurus, rememberSpan]);
 
   // Intercept manuscript right-click — Folio paper menu, not OS chrome.
   useEffect(() => {
@@ -189,7 +209,6 @@ export function WordToolsHost() {
     const unsub = window.folioDesk?.onEditorContextMenu?.((payload) => {
       setMenu((prev) => {
         if (!prev) {
-          // Renderer may not have opened yet (non-manuscript click) — open now.
           queueMicrotask(() => openMenuFromPayload(payload));
           return prev;
         }
@@ -200,6 +219,7 @@ export function WordToolsHost() {
           queueMicrotask(() => openMenuFromPayload(payload));
           return prev;
         }
+        // Keep existing word span — Electron coords can miss TipTap hit-testing.
         return {
           ...prev,
           misspelledWord:
@@ -234,61 +254,81 @@ export function WordToolsHost() {
     };
   }, [fetchThesaurus, openMenuFromPayload]);
 
-  const replaceSpelling = useCallback(
-    (suggestion: string) => {
-      if (!editor || editor.isDestroyed) return;
-      if (window.folioDesk?.replaceMisspelling) {
-        void window.folioDesk.replaceMisspelling(suggestion);
-        return;
-      }
-      const misspelled = menu?.misspelledWord;
+  const resolveReplaceRange = useCallback((): {
+    from: number;
+    to: number;
+    word: string;
+  } | null => {
+    if (!editor || editor.isDestroyed) return null;
+    const remembered = replaceSpanRef.current;
+    if (remembered && remembered.from < remembered.to) return remembered;
+    if (
+      menu?.wordFrom != null &&
+      menu.wordTo != null &&
+      menu.wordFrom < menu.wordTo
+    ) {
+      return {
+        from: menu.wordFrom,
+        to: menu.wordTo,
+        word: menu.word || menu.misspelledWord || "",
+      };
+    }
+    const misspelled = menu?.misspelledWord?.trim();
+    if (misspelled) {
+      const atClick =
+        menu != null
+          ? wordAtEditorCoords(editor, menu.x, menu.y)
+          : null;
       if (
-        menu?.wordFrom != null &&
-        menu.wordTo != null &&
-        menu.wordFrom < menu.wordTo
+        atClick &&
+        atClick.word.toLowerCase() === misspelled.toLowerCase()
       ) {
-        replaceEditorRange(editor, menu.wordFrom, menu.wordTo, suggestion);
-        return;
+        return atClick;
       }
-      const span = wordAtEditorSelection(editor);
-      if (span) {
-        replaceEditorRange(editor, span.from, span.to, suggestion);
-        return;
-      }
-      if (misspelled) {
-        const $from = editor.state.selection.$from;
-        const parent = $from.parent;
-        if (!parent.isTextblock) return;
+      const $from = editor.state.selection.$from;
+      const parent = $from.parent;
+      if (parent.isTextblock) {
         const start = $from.start();
         const text = parent.textContent;
         const idx = text.toLowerCase().indexOf(misspelled.toLowerCase());
-        if (idx < 0) return;
-        replaceEditorRange(
-          editor,
-          start + idx,
-          start + idx + misspelled.length,
-          suggestion,
-        );
+        if (idx >= 0) {
+          return {
+            from: start + idx,
+            to: start + idx + misspelled.length,
+            word: misspelled,
+          };
+        }
+      }
+    }
+    return wordAtEditorSelection(editor);
+  }, [editor, menu]);
+
+  const replaceSpelling = useCallback(
+    (suggestion: string) => {
+      if (!editor || editor.isDestroyed) return;
+      const range = resolveReplaceRange();
+      if (range) {
+        const next = matchReplacementCase(range.word, suggestion);
+        replaceEditorRange(editor, range.from, range.to, next);
+        return;
+      }
+      // Last resort on Desk if we never resolved a TipTap span.
+      if (window.folioDesk?.replaceMisspelling) {
+        void window.folioDesk.replaceMisspelling(suggestion);
       }
     },
-    [editor, menu],
+    [editor, resolveReplaceRange],
   );
 
   const pickSynonym = useCallback(
     (word: string) => {
       if (!editor || editor.isDestroyed) return;
-      if (
-        menu?.wordFrom != null &&
-        menu.wordTo != null &&
-        menu.wordFrom < menu.wordTo
-      ) {
-        replaceEditorRange(editor, menu.wordFrom, menu.wordTo, word);
-        return;
-      }
-      const span = wordAtEditorSelection(editor);
-      if (span) replaceEditorRange(editor, span.from, span.to, word);
+      const range = resolveReplaceRange();
+      if (!range) return;
+      const next = matchReplacementCase(range.word, word);
+      replaceEditorRange(editor, range.from, range.to, next);
     },
-    [editor, menu],
+    [editor, resolveReplaceRange],
   );
 
   const addToDictionary = useCallback(() => {

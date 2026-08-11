@@ -10,7 +10,7 @@ export interface ManuscriptScene {
   html: string;
 }
 
-export const SCENE_BREAK_HTML = `<p class="scene-break" data-type="scene-break">* * *</p>`;
+export const SCENE_BREAK_HTML = `<p class="scene-break" data-type="scene-break"><span class="scene-break-mark">* * *</span></p>`;
 
 const SCENE_BREAK_RE =
   /<p[^>]*(?:class="[^"]*scene-break[^"]*"|data-type="scene-break")[^>]*>[\s\S]*?<\/p>|<p[^>]*>\s*(?:\*\s*){3,}\s*<\/p>/gi;

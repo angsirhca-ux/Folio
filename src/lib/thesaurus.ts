@@ -93,5 +93,38 @@ export function replaceEditorRange(
   to: number,
   text: string,
 ) {
-  editor.chain().focus().insertContentAt({ from, to }, text).run();
+  if (!editor || editor.isDestroyed) return;
+  const docSize = editor.state.doc.content.size;
+  const start = Math.max(0, Math.min(from, docSize));
+  const end = Math.max(start, Math.min(to, docSize));
+  if (!text && start === end) return;
+
+  // insertText replaces [from, to) — more reliable than insertContentAt for
+  // plain dictionary / thesaurus swaps (no HTML parse, keeps surrounding marks).
+  editor
+    .chain()
+    .focus()
+    .command(({ tr, dispatch }) => {
+      if (dispatch) {
+        tr.insertText(text, start, end);
+        dispatch(tr);
+      }
+      return true;
+    })
+    .run();
+}
+
+/**
+ * Prefer matching the source word’s capitalization when the replacement is
+ * a single plain word (Quiet → Still, QUIET → STILL).
+ */
+export function matchReplacementCase(source: string, replacement: string): string {
+  if (!source || !replacement) return replacement;
+  if (source === source.toUpperCase() && source.length > 1) {
+    return replacement.toUpperCase();
+  }
+  if (source[0] === source[0].toUpperCase() && source.slice(1) === source.slice(1).toLowerCase()) {
+    return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+  }
+  return replacement;
 }

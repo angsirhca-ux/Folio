@@ -53,7 +53,7 @@ export const SceneBreak = Node.create({
         class: "scene-break",
         "data-type": "scene-break",
       }),
-      "* * *",
+      ["span", { class: "scene-break-mark" }, "* * *"],
     ];
   },
 
@@ -63,7 +63,10 @@ export const SceneBreak = Node.create({
       dom.className = "scene-break";
       dom.setAttribute("data-type", "scene-break");
       dom.setAttribute("contenteditable", "false");
-      dom.textContent = "* * *";
+      const mark = document.createElement("span");
+      mark.className = "scene-break-mark";
+      mark.textContent = "* * *";
+      dom.appendChild(mark);
       return {
         dom,
         // Atom — no editable content DOM

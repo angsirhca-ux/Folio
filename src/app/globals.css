@@ -163,7 +163,7 @@ body {
 }
 
 /* Novel rhythm: indent, no blank line between body paragraphs */
-.manuscript-editor .ProseMirror > p + p {
+.manuscript-editor .ProseMirror > p + p:not(.scene-break):not([data-type="scene-break"]) {
   text-indent: 1.5em;
   margin-top: 0;
 }
@@ -264,31 +264,46 @@ body {
   text-indent: 0;
 }
 
-/* Scene break ornaments — flex + optical padding so letter-spacing
-   doesn’t leave “* * *” sitting left of true center. */
+/* Scene break ornaments — true center.
+   Do NOT letter-space the <p> itself (that shifts glyphs left under
+   justify / flex). Space the mark on an inner span and cancel the
+   trailing letter-spacing with a matching negative margin. */
 .manuscript-editor .ProseMirror p.scene-break,
-.manuscript-editor .ProseMirror [data-type="scene-break"],
+.manuscript-editor .ProseMirror p[data-type="scene-break"],
 .manuscript-editor .ProseMirror > p.scene-break {
-  display: flex !important;
-  justify-content: center !important;
-  align-items: center;
-  width: 100%;
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 1.6em 0 !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  padding: 0 !important;
   text-align: center !important;
   text-align-last: center !important;
   text-indent: 0 !important;
-  letter-spacing: 0.45em;
-  /* letter-spacing adds space after the last glyph — pad the start to balance */
-  padding-left: 0.45em !important;
-  padding-right: 0 !important;
+  text-justify: auto !important;
+  letter-spacing: normal !important;
+  hyphens: none !important;
+  -webkit-hyphens: none !important;
   color: var(--ink-muted);
-  margin: 1.6em 0 !important;
   font-family: var(--font-display);
   user-select: none;
   cursor: default;
 }
 
+.manuscript-editor .ProseMirror p.scene-break .scene-break-mark,
+.manuscript-editor .ProseMirror p[data-type="scene-break"] .scene-break-mark {
+  display: inline-block;
+  letter-spacing: 0.55em;
+  margin-right: -0.55em; /* optical center — cancels trailing letter-space */
+  font-family: var(--font-display);
+  color: var(--ink-muted);
+  pointer-events: none;
+}
+
 .manuscript-editor .ProseMirror p.scene-break.ProseMirror-selectednode,
-.manuscript-editor .ProseMirror [data-type="scene-break"].ProseMirror-selectednode {
+.manuscript-editor .ProseMirror p[data-type="scene-break"].ProseMirror-selectednode {
   outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   outline-offset: 6px;
   border-radius: 2px;
