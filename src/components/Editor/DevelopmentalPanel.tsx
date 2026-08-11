@@ -773,8 +773,12 @@ export function DevelopmentalPanel({
 
                   {openFlagCount === 0 ? (
                     <p className="font-[family-name:var(--font-ui)] text-sm italic text-[var(--ink-faint)]">
-                      No open moments — run a pass, or everything here was
-                      dismissed.
+                      {Array.isArray(activePass.flags) &&
+                      activePass.flags.length === 0
+                        ? activePass.summary
+                          ? "Overview only — no page moments were flagged. Re-run Action if you expected kinetic excerpts."
+                          : "No moments flagged on this pass."
+                        : "No open moments — everything here was dismissed."}
                     </p>
                   ) : (
                     grouped.map(([category, flags]) => (

@@ -281,9 +281,9 @@ export function BetaReadersPanel({
                     className="overflow-hidden"
                   >
                     <p className="mt-3 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-                      Readers keep memory across chapters — reactions and craft
-                      answers only. Never rewrites. Collapse this bar to read
-                      the full response.
+                      Beat-by-beat reactions through the chapter, craft answers,
+                      then a closing reader wish (what they’d want emotionally —
+                      or like it as-is). Memory carries forward. Never rewrites.
                     </p>
 
                     <div className="mt-3 grid gap-2">
@@ -499,6 +499,10 @@ export function BetaReadersPanel({
                     <h3 className="font-[family-name:var(--font-display)] text-sm tracking-wide text-[var(--ink)]">
                       Emotional response
                     </h3>
+                    <p className="mt-1 font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-faint)]">
+                      {review.reactions.length} beat
+                      {review.reactions.length === 1 ? "" : "s"}
+                    </p>
                     <ul className="mt-3 space-y-3">
                       {review.reactions.map((r) => (
                         <li
@@ -549,6 +553,20 @@ export function BetaReadersPanel({
                       })}
                     </ul>
                   </section>
+
+                  {review.readerWish?.trim() ? (
+                    <section className="rounded-xl border border-[rgba(176,141,87,0.22)] bg-[rgba(247,243,234,0.55)] px-3.5 py-3">
+                      <h3 className="font-[family-name:var(--font-display)] text-sm tracking-wide text-[var(--ink)]">
+                        As a reader, I’d want…
+                      </h3>
+                      <p className="mt-1 font-[family-name:var(--font-ui)] text-[0.7rem] leading-relaxed text-[var(--ink-faint)]">
+                        Emotional wish — or an honest “leave it as-is.”
+                      </p>
+                      <p className="mt-2 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
+                        {review.readerWish}
+                      </p>
+                    </section>
+                  ) : null}
 
                   <button
                     type="button"

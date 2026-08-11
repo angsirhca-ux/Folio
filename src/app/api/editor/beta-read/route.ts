@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import {
   BETA_READ_TOOL,
+  BETA_READ_MAX_TOKENS,
   betaReadSystemPrompt,
   betaReadTool,
   buildBetaReadContext,
   normalizeBetaReadPayload,
+  targetBetaReactionCount,
   type BetaReadPayload,
 } from "@/lib/betaReaders";
 import { chapterToPlainText } from "@/lib/developmentalEditor";
@@ -97,6 +99,8 @@ export async function POST(request: Request) {
     ? body.book.chapters
     : [chapter];
 
+  const { min, softMax } = targetBetaReactionCount(plain.length);
+
   const context = buildBetaReadContext({
     book: {
       title: body.book?.title ?? "",
@@ -113,7 +117,7 @@ export async function POST(request: Request) {
   try {
     const message = await client.messages.create({
       model: anthropicModel(),
-      max_tokens: 4096,
+      max_tokens: BETA_READ_MAX_TOKENS,
       tools: [betaReadTool],
       tool_choice: { type: "tool", name: BETA_READ_TOOL },
       system: betaReadSystemPrompt,
@@ -123,8 +127,10 @@ export async function POST(request: Request) {
           content: `Read this chapter as ${body.reader.name} and respond with the save_beta_read tool.
 
 Remember:
-- Emotional reactions first — name the feeling, cite a short excerpt when you can (2–6 reactions).
+- reactions FIRST — beat-by-beat in chapter order (target at least ${min}, soft max ~${softMax}). Cite a short verbatim excerpt on nearly every beat.
 - Answer every craft question id briefly.
+- readerWish: what you’d emotionally want instead, OR say you like it as-is and would change nothing.
+- summary last — 1–2 sentences only.
 - memoryUpdates only for durable impressions you’ll need in later chapters (max 5).
 - Never rewrite the manuscript.
 

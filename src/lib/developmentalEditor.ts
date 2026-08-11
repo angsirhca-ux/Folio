@@ -25,7 +25,8 @@ export const MAX_MEMORY_NOTES = 40;
 export const MAX_PASSES_KEPT = 24;
 /** Safety ceiling so a runaway response can’t hang the UI — not a “top 12 only” filter. */
 export const MAX_FLAGS_PER_PASS = 40;
-export const REVIEW_MAX_TOKENS = 6144;
+/** Flags-first tool output needs headroom — summaries used to starve the array. */
+export const REVIEW_MAX_TOKENS = 8192;
 /**
  * Long chapters are reviewed in windows of this size so each Claude call
  * finishes within a single client request (~2k words per window).
@@ -455,24 +456,110 @@ export function coerceFlagCategory(
   raw: string | undefined,
 ): DevelopmentalFlagCategory | null {
   const allowed = categoriesForPass(kind);
-  if (raw && (allowed as string[]).includes(raw)) {
-    return raw as DevelopmentalFlagCategory;
+  const normalized = (raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-");
+  if (normalized && (allowed as string[]).includes(normalized)) {
+    return normalized as DevelopmentalFlagCategory;
   }
   // Legacy Line Edit category
-  if (raw === "show-dont-tell") {
-    return kind === "story" ? "telling" : null;
+  if (normalized === "show-dont-tell" || normalized === "show-vs-tell") {
+    if (kind === "action") return "summarized-action";
+    if (kind === "story") return "telling";
+    return null;
   }
   if (kind === "story") {
-    if (raw === "dialogue-polish" || raw === "dialogue-tags") {
+    if (
+      normalized === "dialogue-polish" ||
+      normalized === "dialogue-tags" ||
+      normalized === "voice"
+    ) {
       return "character-voice";
     }
-    if (raw === "flow-rhythm" || raw === "redundancy") return "pacing";
+    if (normalized === "flow-rhythm" || normalized === "redundancy") {
+      return "pacing";
+    }
+    if (normalized === "plot" || normalized === "logic" || normalized === "hole") {
+      return "plot-holes";
+    }
   }
   if (kind === "action") {
-    if (raw === "telling") return "summarized-action";
-    if (raw === "pacing") return "blurred-sequence";
+    if (
+      normalized === "telling" ||
+      normalized === "summary" ||
+      normalized === "summarized" ||
+      normalized === "action" ||
+      normalized === "kinetic" ||
+      normalized === "dramatize" ||
+      normalized === "dramatisation" ||
+      normalized === "dramatization"
+    ) {
+      return "summarized-action";
+    }
+    if (
+      normalized === "static" ||
+      normalized === "description" ||
+      normalized === "inert" ||
+      normalized === "static-desc"
+    ) {
+      return "static-description";
+    }
+    if (
+      normalized === "dialogue" ||
+      normalized === "talking-head" ||
+      normalized === "talkingheads" ||
+      normalized === "heads"
+    ) {
+      return "talking-heads";
+    }
+    if (
+      normalized === "pacing" ||
+      normalized === "blur" ||
+      normalized === "fight" ||
+      normalized === "chase" ||
+      normalized === "sequence"
+    ) {
+      return "blurred-sequence";
+    }
+    if (
+      normalized === "emotion" ||
+      normalized === "named-emotion" ||
+      normalized === "feeling" ||
+      normalized === "gesture"
+    ) {
+      return "named-emotion-action";
+    }
+  }
+  if (kind === "style") {
+    if (normalized === "filters" || normalized === "filter") {
+      return "filter-words";
+    }
+    if (normalized === "verbs" || normalized === "passive") {
+      return "weak-verbs";
+    }
+    if (normalized === "repeat" || normalized === "repeats") {
+      return "repetition";
+    }
+    if (normalized === "tags") return "dialogue-tags";
+    if (normalized === "ly" || normalized === "adverb") return "adverbs";
+    if (normalized === "rhythm" || normalized === "flow") return "flow-rhythm";
+    if (normalized === "diction" || normalized === "wordchoice") {
+      return "word-choice";
+    }
+    if (normalized === "dialogue") return "dialogue-polish";
   }
   return null;
+}
+
+/** Last-resort bucket when Claude invents a category we don't recognize. */
+export function defaultCategoryForPass(
+  kind: DevelopmentalPassKind,
+): DevelopmentalFlagCategory {
+  if (kind === "style") return "word-choice";
+  if (kind === "story") return "telling";
+  if (kind === "action") return "summarized-action";
+  return "forgotten-detail";
 }
 
 export function normalizeReviewPayload(
@@ -489,8 +576,8 @@ export function normalizeReviewPayload(
   }>(payload?.flags)
     .map((f) => {
       if (!f?.excerpt?.trim() || !f.note?.trim()) return null;
-      const category = coerceFlagCategory(kind, f.category);
-      if (!category) return null;
+      const category =
+        coerceFlagCategory(kind, f.category) ?? defaultCategoryForPass(kind);
       return {
         id: createId(),
         category,
@@ -906,6 +993,7 @@ HARD RULES:
 - Do NOT insert, paste, or apply anything into the manuscript. Suggestions exist only in this review response.
 - Do NOT offer a full polished rewrite of the paragraph ready to drop in. Keep examples short and tentative.
 - The summary alone is NOT enough. You MUST return discrete flags for concrete moments in the text.
+- Emit the flags array BEFORE writing the summary. Keep the summary to ONE or TWO short sentences — never a laundry list of issues (those belong in flags).
 - Every flag needs: a short verbatim excerpt (a phrase or sentence the author can find on the page), a diagnostic note, and EXACTLY TWO suggestions with fixed roles:
   1) DIRECTION — one gentle craft steer (what to try / what to cut / what to lean on). Start with "perhaps…", "consider…", or "try…".
   2) EXAMPLE — one short illustrative sketch of how that direction might sound on the page (a clause or two, or a tiny beat). Frame it as a possibility ("e.g. something like…", "for instance…"), not as the author's new line. Specific sensory or action detail beats vague verbs like "reveal" or "show".
@@ -922,7 +1010,8 @@ HARD RULES:
 - Use AUTHOR PREFERENCES and EDITOR MEMORY to stay consistent: lean into patterns they liked; soften categories they disliked — but still flag genuine issues.
 - Use PRIOR CHAPTER DIGESTS when present: do not rehash the same lecture if a pattern was already noted earlier unless it clearly recurs in this chapter’s text.
 - Prefer precise, spare notes. No cheerleading. No marketing tone.
-- If the chapter is thin, return few or no flags rather than stretching.
+- Empty flags are rare. If you notice concrete issues for this pass, you MUST emit flags with verbatim excerpts — never dump those moments into the summary alone. A summary-only response with an empty flags array is a failure unless the chapter truly has nothing for this pass.
+- If the chapter is thin or already strong on this pass’s concerns, return few flags — still flag real issues you see.
 - memoryUpdates: only durable patterns worth remembering later (max 4). Skip one-off nits.`;
 
   if (kind === "style") {
@@ -951,17 +1040,17 @@ Ignore story/plot/character-arc and show-vs-tell (those belong to Story & Struct
   if (kind === "action") {
     return `${shared}
 
-ACTION — find moments where dramatized physical/dramatic action could carry what is currently told, summarized, static, or blurred. This is NOT a general show-vs-tell pass (Story owns that). Prefer kinetic opportunities.
+ACTION — find moments where dramatized physical/dramatic action could carry what is currently told, summarized, static, or blurred. This is NOT a general show-vs-tell pass (Story owns that). Prefer kinetic opportunities — but do flag them as discrete excerpts, not only in the summary.
 
 Categories (use only these ids):
-1. summarized-action — a high-stakes beat told or summarized instead of dramatized in sequence.
+1. summarized-action — a beat told or summarized instead of dramatized in sequence (stakes, arrival, confrontation, departure, work, violence, intimacy with physical consequence).
 2. static-description — inert description where motion, choice, or cause→effect would serve the scene.
 3. talking-heads — dialogue or pure interior with no physical grounding when the scene needs embodied beats.
-4. blurred-sequence — fight, chase, labor, or ritual as blur rather than clear action with consequence.
+4. blurred-sequence — fight, chase, labor, travel, or ritual as blur rather than clear action with consequence.
 5. named-emotion-action — emotion labeled where a gesture or concrete action beat could carry it (narrow — do not vacuum every telling).
 
-For each real instance, flag with a verbatim excerpt. Soft cap ~${MAX_FLAGS_PER_PASS}.
-EXAMPLE suggestions should name a concrete beat (hand, weight, timing, consequence) — not "make it more active."
+CRITICAL: Fill flags FIRST. Do not return summary-only. If you describe opportunities in the summary, each one that has a locatable sentence in the chapter MUST become a flag with that verbatim excerpt. Empty flags only when the chapter is already beat-by-beat dramatized with no missed kinetic openings. Keep summary to 1–2 sentences.
+Soft cap ~${MAX_FLAGS_PER_PASS}. EXAMPLE suggestions should name a concrete beat (hand, weight, timing, consequence) — not "make it more active."
 Ignore filter words, plot holes, and book-wide continuity. Do not rewrite the manuscript.`;
   }
 
@@ -990,18 +1079,15 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
   const categories = categoriesForPass(kind);
   return {
     name: REVIEW_TOOL_NAME,
-    description: `Save editorial flags for this ${chapterPassLabel(kind)} pass (up to ${MAX_FLAGS_PER_PASS}). Suggestions stay in this review only — never applied to the manuscript.`,
+    description: `Save editorial flags for this ${chapterPassLabel(kind)} pass (up to ${MAX_FLAGS_PER_PASS}). Put flags first; summary last and brief. Suggestions stay in this review only — never applied to the manuscript.`,
     input_schema: {
       type: "object" as const,
+      // Property order matters: models fill keys in order. Flags before summary
+      // so a long overview cannot starve the token budget.
       properties: {
-        summary: {
-          type: "string",
-          description:
-            "2–4 sentences: overall editorial skim of this chapter for this pass.",
-        },
         flags: {
           type: "array",
-          description: `All distinct issues found (soft max ${MAX_FLAGS_PER_PASS}; skip identical repeats).`,
+          description: `Discrete issues with verbatim excerpts (soft max ${MAX_FLAGS_PER_PASS}). Fill this FIRST. Required whenever you notice issues — never put flaggable moments only in summary. Empty array only if nothing fits this pass.`,
           items: {
             type: "object",
             properties: {
@@ -1015,11 +1101,12 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
               },
               excerpt: {
                 type: "string",
-                description: "Short verbatim quote from the chapter.",
+                description:
+                  "Short verbatim quote from the chapter (copy-pasteable).",
               },
               note: {
                 type: "string",
-                description: "What to notice — why this was flagged.",
+                description: "What to notice — why this was flagged (1–2 sentences).",
               },
               suggestions: {
                 type: "array",
@@ -1050,8 +1137,13 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
             required: ["text"],
           },
         },
+        summary: {
+          type: "string",
+          description:
+            "ONE or TWO short sentences only — high-level skim. Do NOT list individual issues here; those go in flags.",
+        },
       },
-      required: ["summary", "flags"],
+      required: ["flags", "summary"],
     },
   };
 }

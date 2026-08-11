@@ -312,8 +312,9 @@ export function FolioHowToDialog({
               </p>
               <p>
                 <span className="text-[var(--ink)]">Beta readers</span> —
-                persona passes that remember earlier chapters. They react and
-                answer craft questions; they don’t rewrite.
+                persona passes that remember earlier chapters. They react
+                beat-by-beat, answer craft questions, and close with what they’d
+                emotionally want instead (or like it as-is). They don’t rewrite.
               </p>
               <p>
                 <span className="text-[var(--ink)]">Critique</span> — genre

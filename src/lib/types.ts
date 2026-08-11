@@ -874,6 +874,11 @@ export interface BetaReview {
   summary: string;
   reactions: BetaReaction[];
   craftAnswers: BetaCraftAnswer[];
+  /**
+   * Closing reader wish: what they'd emotionally want instead,
+   * or an explicit "like it as-is / change nothing."
+   */
+  readerWish: string;
 }
 
 /** Cross-chapter impressions this persona carries forward. */

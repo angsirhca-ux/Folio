@@ -21,6 +21,20 @@ import { createId } from "./utils";
 export const BETA_READ_TOOL = "save_beta_read";
 export const MAX_BETA_MEMORY = 48;
 export const MAX_BETA_REVIEWS = 40;
+/** Soft ceiling — long chapters can fill this with beat-by-beat reactions. */
+export const MAX_BETA_REACTIONS = 36;
+export const BETA_READ_MAX_TOKENS = 8192;
+
+/** Target reaction count from chapter length (beat-by-beat, not a skim). */
+export function targetBetaReactionCount(plainLength: number): {
+  min: number;
+  softMax: number;
+} {
+  if (plainLength < 2_500) return { min: 6, softMax: 12 };
+  if (plainLength < 6_000) return { min: 10, softMax: 18 };
+  if (plainLength < 12_000) return { min: 14, softMax: 24 };
+  return { min: 18, softMax: MAX_BETA_REACTIONS };
+}
 
 export const BETA_CRAFT_QUESTIONS: Array<{
   id: BetaCraftQuestionId;
@@ -179,8 +193,10 @@ function normalizeReview(r: Partial<BetaReview>): BetaReview | null {
     summary: (r.summary ?? "").trim().slice(0, 1600),
     reactions: (r.reactions ?? [])
       .map(normalizeReaction)
-      .filter(Boolean) as BetaReaction[],
+      .filter(Boolean)
+      .slice(0, MAX_BETA_REACTIONS) as BetaReaction[],
     craftAnswers: normalizeCraftAnswers(r.craftAnswers),
+    readerWish: (r.readerWish ?? "").trim().slice(0, 1200),
   };
 }
 
@@ -219,6 +235,8 @@ export type BetaReadPayload = {
     questionId: string;
     answer: string;
   }>;
+  /** What this reader would emotionally want instead — or like-it-as-is. */
+  readerWish?: string;
   memoryUpdates?: Array<{
     kind?: BetaMemoryNote["kind"];
     text: string;
@@ -248,10 +266,11 @@ export function normalizeBetaReadPayload(
         }),
       )
       .filter(Boolean)
-      .slice(0, 12) as BetaReaction[],
+      .slice(0, MAX_BETA_REACTIONS) as BetaReaction[],
     craftAnswers: normalizeCraftAnswers(
       raw?.craftAnswers as Partial<BetaCraftAnswer>[] | undefined,
     ),
+    readerWish: (raw?.readerWish ?? "").trim().slice(0, 1200),
   };
 
   const memoryUpdates: BetaMemoryNote[] = (raw?.memoryUpdates ?? [])
@@ -334,6 +353,7 @@ export function buildBetaReadContext(args: {
   reviews: BetaReview[];
 }): string {
   const plain = truncateChapterPlain(chapterToPlainText(args.chapter.content));
+  const { min, softMax } = targetBetaReactionCount(plain.length);
   const chapterIndex = args.book.chapters.findIndex(
     (c) => c.id === args.chapter.id,
   );
@@ -393,6 +413,8 @@ export function buildBetaReadContext(args: {
     "EMOTIONS you may use:",
     emotions,
     "",
+    `REACTION TARGET for this chapter length: at least ${min} beat-level reactions, soft max ~${softMax}. Walk the chapter in order — do not skim to 3–4 highlights.`,
+    "",
     "CRAFT QUESTIONS — answer EVERY id:",
     questions,
     "",
@@ -411,23 +433,24 @@ HARD RULES:
 - Speak as a reader: honest emotional reactions and craft answers.
 - Use YOUR MEMORY and prior chapter digests so your take stays consistent across the book.
 - Every craft question id must receive an answer.
-- reactions: 2–8 emotional beats from this chapter. Prefer concrete moments with a short verbatim excerpt when you can find one.
+- reactions: beat-by-beat through the chapter in reading order. Aim for the REACTION TARGET in the user context (often a dozen or more on a full chapter). Each reaction should usually include a short verbatim excerpt so the author can find the moment. Cover arrivals, turns, dialogue spikes, lulls, and the exit — not only the climax.
+- Do not collapse a long stretch into one reaction when several distinct feelings hit.
+- readerWish (required): close as a reader. Say what you would emotionally want instead in this chapter (more of X, less of Y, a different beat or payoff) — OR clearly say you like it as-is and would change nothing. No manuscript rewrite; desire/wish language only.
+- Fill reactions FIRST in the tool call, then craft answers, then readerWish, then a short summary last.
 - memoryUpdates: only durable impressions worth remembering in later chapters (attachments, open questions, expectations, confusion). Skip one-off nits.
 - Be specific and spare. No cheerleading. No marketing tone.`;
 
 export const betaReadTool: Anthropic.Tool = {
   name: BETA_READ_TOOL,
   description:
-    "Save a beta reader response for one chapter — emotions, craft answers, and durable memory. Never manuscript rewrites.",
+    "Save a beat-by-beat beta reader response for one chapter — reactions first, craft answers, reader wish, brief summary. Never manuscript rewrites.",
   input_schema: {
     type: "object",
+    // Property order matters: models fill keys in order.
     properties: {
-      summary: {
-        type: "string",
-        description: "2–5 sentences: your overall take on this chapter.",
-      },
       reactions: {
         type: "array",
+        description: `Beat-by-beat emotional responses in chapter order (often 12–${MAX_BETA_REACTIONS}; follow REACTION TARGET). Prefer a verbatim excerpt on each.`,
         items: {
           type: "object",
           properties: {
@@ -453,11 +476,11 @@ export const betaReadTool: Anthropic.Tool = {
             excerpt: {
               type: "string",
               description:
-                "Short verbatim quote from the chapter when relevant.",
+                "Short verbatim quote from the chapter for this beat (strongly preferred).",
             },
             note: {
               type: "string",
-              description: "Why you felt this.",
+              description: "Why you felt this at this moment.",
             },
           },
           required: ["emotion", "note"],
@@ -484,6 +507,11 @@ export const betaReadTool: Anthropic.Tool = {
           required: ["questionId", "answer"],
         },
       },
+      readerWish: {
+        type: "string",
+        description:
+          "As a reader, what would you emotionally want instead in this chapter — or say clearly that you like it as-is and would change nothing. Desire language only; no pasted rewrite.",
+      },
       memoryUpdates: {
         type: "array",
         items: {
@@ -504,7 +532,12 @@ export const betaReadTool: Anthropic.Tool = {
           required: ["text"],
         },
       },
+      summary: {
+        type: "string",
+        description:
+          "ONE or TWO short sentences — overall take. Do not dump beat-level reactions here; those belong in reactions.",
+      },
     },
-    required: ["summary", "reactions", "craftAnswers"],
+    required: ["reactions", "craftAnswers", "readerWish", "summary"],
   },
 };

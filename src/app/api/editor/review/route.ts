@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type Anthropic from "@anthropic-ai/sdk";
 import {
   REVIEW_TOOL_NAME,
   REVIEW_MAX_TOKENS,
@@ -28,6 +29,7 @@ import type {
   Book,
   Chapter,
   DevelopmentalMemoryNote,
+  DevelopmentalPass,
   DevelopmentalPassKind,
 } from "@/lib/types";
 
@@ -46,6 +48,24 @@ function coerceReviewPayload(raw: ReviewPayload): ReviewPayload {
     flags: asObjectArray(raw?.flags),
     memoryUpdates: asObjectArray(raw?.memoryUpdates),
   };
+}
+
+/** True when the model wrote an overview but emitted no usable flags. */
+function isSummaryOnlyPass(pass: DevelopmentalPass): boolean {
+  const flags = Array.isArray(pass.flags) ? pass.flags : [];
+  return flags.length === 0 && pass.summary.trim().length >= 80;
+}
+
+function quotedPhrasesFromSummary(summary: string): string[] {
+  const out: string[] = [];
+  const re = /[“"]([^”"]{8,120})[”"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(summary)) != null) {
+    const phrase = m[1].trim();
+    if (phrase && !out.includes(phrase)) out.push(phrase);
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 
 export async function GET() {
@@ -87,6 +107,25 @@ function dedupeMemory(
     if (out.length >= 12) break;
   }
   return out;
+}
+
+async function callReviewTool(
+  client: Anthropic,
+  args: {
+    tool: ReturnType<typeof reviewToolForKind>;
+    system: string;
+    userContent: string;
+  },
+): Promise<ReviewPayload | null> {
+  const message = await client.messages.create({
+    model: anthropicModel(),
+    max_tokens: REVIEW_MAX_TOKENS,
+    tools: [args.tool],
+    tool_choice: { type: "tool", name: REVIEW_TOOL_NAME },
+    system: args.system,
+    messages: [{ role: "user", content: args.userContent }],
+  });
+  return extractToolInput<ReviewPayload>(message, REVIEW_TOOL_NAME);
 }
 
 export async function POST(request: Request) {
@@ -165,7 +204,7 @@ export async function POST(request: Request) {
   const narrativePerson = detectNarrativePerson(plain);
 
   try {
-    const allFlags = [];
+    const allFlags: DevelopmentalPass["flags"] = [];
     const summaries: string[] = [];
     const allMemory: DevelopmentalMemoryNote[] = [];
 
@@ -193,35 +232,28 @@ export async function POST(request: Request) {
         narrativePerson,
       });
 
-      const message = await client.messages.create({
-        model: anthropicModel(),
-        max_tokens: REVIEW_MAX_TOKENS,
-        tools: [tool],
-        tool_choice: { type: "tool", name: REVIEW_TOOL_NAME },
-        system,
-        messages: [
-          {
-            role: "user",
-            content: `Run a ${passLabel} pass on the current chapter${
-              windowTotal > 1
-                ? ` (window ${window.index + 1}/${windowTotal})`
-                : ""
-            }.
+      const baseUser = `Run a ${passLabel} pass on the current chapter${
+        windowTotal > 1
+          ? ` (window ${window.index + 1}/${windowTotal})`
+          : ""
+      }.
 
 Remember:
-- Return discrete flags for specific moments (verbatim excerpts the author can find on the page).
+- Fill the flags array FIRST (verbatim excerpts the author can find on the page), then a 1–2 sentence summary last.
 - Flag real issues — don’t drop problems to keep the list short. Soft max around ${MAX_FLAGS_PER_PASS} flags across the whole chapter; collapse identical repeats into representative moments.
-- A summary overview is fine, but flags are required whenever you notice issues — do not put everything only in the summary.
+- Never put flaggable moments only in the summary. Empty flags + a long overview is invalid.
+- For Action: every kinetic opportunity (summarized beat, static block, talking-heads stretch, blurred fumble, labeled emotion wanting a gesture) must be its own flag.
 - Suggestions stay in this review only — never rewrite or insert into the manuscript.
 
 ${suggestionQualityRules(narrativePerson)}
 
-${context}`,
-          },
-        ],
-      });
+${context}`;
 
-      const raw = extractToolInput<ReviewPayload>(message, REVIEW_TOOL_NAME);
+      let raw = await callReviewTool(client, {
+        tool,
+        system,
+        userContent: baseUser,
+      });
       if (!raw) {
         return NextResponse.json(
           {
@@ -234,11 +266,57 @@ ${context}`,
         );
       }
 
-      const { pass, memoryUpdates } = normalizeReviewPayload(
+      let { pass, memoryUpdates } = normalizeReviewPayload(
         body.kind,
         coerceReviewPayload(raw),
         chapter,
       );
+
+      // Common failure: long overview, zero flags (token starvation or model habit).
+      if (isSummaryOnlyPass(pass)) {
+        const quotes = quotedPhrasesFromSummary(pass.summary);
+        const quoteHint =
+          quotes.length > 0
+            ? `Turn these quoted phrases into flags (excerpt = the quote):\n${quotes.map((q) => `- "${q}"`).join("\n")}`
+            : "Pull at least 4–8 verbatim excerpts from the chapter text that match the issues in that overview.";
+
+        raw = await callReviewTool(client, {
+          tool,
+          system,
+          userContent: `RETRY — your previous ${passLabel} response was INVALID.
+
+You returned a long overview and ZERO flags. That is not allowed.
+
+Previous overview (convert its issues into flags; keep overview to 1–2 sentences):
+${pass.summary.slice(0, 1200)}
+
+${quoteHint}
+
+Call ${REVIEW_TOOL_NAME} again with:
+1) flags array FIRST — each flag needs category, verbatim excerpt from the chapter, note, and two suggestions
+2) brief summary LAST (1–2 sentences only)
+
+${suggestionQualityRules(narrativePerson)}
+
+${context}`,
+        });
+
+        if (raw) {
+          const retried = normalizeReviewPayload(
+            body.kind,
+            coerceReviewPayload(raw),
+            chapter,
+          );
+          if (
+            Array.isArray(retried.pass.flags) &&
+            retried.pass.flags.length > 0
+          ) {
+            pass = retried.pass;
+            memoryUpdates = [...memoryUpdates, ...retried.memoryUpdates];
+          }
+        }
+      }
+
       allFlags.push(...(Array.isArray(pass.flags) ? pass.flags : []));
       if (pass.summary.trim()) {
         summaries.push(
