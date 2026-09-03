@@ -172,6 +172,7 @@ export async function composeSoundtrackWithClaude(
         author: book.author,
         chapters: book.chapters,
         soundtrack: book.soundtrack ?? [],
+        soundtrackTaste: book.soundtrackTaste ?? [],
       },
       manuscriptIndex,
     }),
@@ -182,7 +183,10 @@ export async function composeSoundtrackWithClaude(
   if (!res.ok) {
     throw new Error(data.error || "Could not compose soundtrack.");
   }
-  return { songs: data.songs ?? [] };
+  return {
+    arcBlurb: data.arcBlurb ?? "",
+    songs: data.songs ?? [],
+  };
 }
 
 export function mergeEnrichmentIntoCharacter(

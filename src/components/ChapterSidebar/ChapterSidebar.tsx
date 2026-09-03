@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  ArrowRightLeft,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -13,7 +14,9 @@ import {
   Trash2,
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { MoveChapterDialog } from "@/components/ChapterSidebar/MoveChapterDialog";
 import { SceneStatusDot } from "@/components/SceneStatusDot";
+import { booksInSeries } from "@/lib/series";
 import { nextSceneStatus, type SceneStatus } from "@/lib/types";
 import { useBook } from "@/providers/BookProvider";
 import { cn } from "@/lib/utils";
@@ -22,11 +25,14 @@ export function ChapterSidebar() {
   const {
     book,
     settings,
+    libraryBooks,
+    librarySeries,
     selectChapter,
     selectAdjacentChapter,
     addChapter,
     renumberChapters,
     deleteChapter,
+    moveChapterToBook,
     updateChapterTitle,
     moveChapter,
     reorderChapters,
@@ -38,11 +44,23 @@ export function ChapterSidebar() {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [moveChapterId, setMoveChapterId] = useState<string | null>(null);
+  const [pendingMoveTargetId, setPendingMoveTargetId] = useState<string | null>(
+    null,
+  );
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [activeSceneIndex, setActiveSceneIndex] = useState<number | null>(null);
 
   const pendingChapter = book.chapters.find((c) => c.id === pendingDeleteId);
+  const chapterToMove = book.chapters.find((c) => c.id === moveChapterId);
   const isLastChapter = book.chapters.length <= 1;
+  const siblingBooks = book.seriesId
+    ? booksInSeries(libraryBooks, book.seriesId).filter((b) => b.id !== book.id)
+    : [];
+  const canMoveToSeriesBook = siblingBooks.length > 0;
+  const seriesTitle = book.seriesId
+    ? librarySeries.find((s) => s.id === book.seriesId)?.title
+    : undefined;
 
   // Keep the active chapter’s scene list open so the arrow feels immediate
   useEffect(() => {
@@ -278,6 +296,24 @@ export function ChapterSidebar() {
                         </button>
                       </div>
 
+                      {canMoveToSeriesBook ? (
+                        <button
+                          type="button"
+                          aria-label={`Move ${chapter.title} to another book in the series`}
+                          title="Move to another book in the series"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMoveChapterId(chapter.id);
+                          }}
+                          className="mr-0.5 rounded p-1 opacity-0 transition-opacity duration-300 group-hover:opacity-60 hover:!opacity-100"
+                        >
+                          <ArrowRightLeft
+                            className="h-3.5 w-3.5 text-[var(--ink-muted)]"
+                            strokeWidth={1.5}
+                          />
+                        </button>
+                      ) : null}
+
                       <button
                         type="button"
                         aria-label={`Delete ${chapter.title}`}
@@ -402,6 +438,43 @@ export function ChapterSidebar() {
           </motion.aside>
         ) : null}
       </AnimatePresence>
+
+      <MoveChapterDialog
+        open={Boolean(moveChapterId)}
+        chapterTitle={chapterToMove?.title ?? "This chapter"}
+        seriesTitle={seriesTitle}
+        targetBooks={siblingBooks}
+        onClose={() => {
+          setMoveChapterId(null);
+          setPendingMoveTargetId(null);
+        }}
+        onMove={(targetBookId) => {
+          if (!moveChapterId) return;
+          if (isLastChapter) {
+            setPendingMoveTargetId(targetBookId);
+            return;
+          }
+          moveChapterToBook(moveChapterId, targetBookId);
+          setMoveChapterId(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(pendingMoveTargetId && moveChapterId)}
+        onOpenChange={(open) => {
+          if (!open) setPendingMoveTargetId(null);
+        }}
+        title="Move your only chapter?"
+        description={`“${chapterToMove?.title ?? "This chapter"}” is the only chapter in this book. Moving it will leave a blank chapter here.`}
+        confirmLabel="Move chapter"
+        onConfirm={() => {
+          if (moveChapterId && pendingMoveTargetId) {
+            moveChapterToBook(moveChapterId, pendingMoveTargetId);
+          }
+          setMoveChapterId(null);
+          setPendingMoveTargetId(null);
+        }}
+      />
 
       <ConfirmDialog
         open={Boolean(pendingDeleteId)}

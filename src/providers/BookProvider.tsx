@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { AppSettings, Book, Chapter, Character, DevelopmentalMemoryNote, DevelopmentalPass, DumpPage, EncyclopediaEntry, EncyclopediaStack, FamilyTree, Location, ManuscriptIndexData, PlotThread, ResearchEntry, StoryMap, StoryMapLabel, StoryMapPath, StoryMapPin, StoryMapRegion, ThemeId, TrashedBook, BetaMemoryNote, BetaReview, CritiqueMemoryNote, CritiqueReview } from "@/lib/types";
+import type { AppSettings, Book, BookCompileSettings, BookFrontMatter, Chapter, ChapterCompileSettings, Character, DevelopmentalMemoryNote, DevelopmentalPass, DumpPage, EncyclopediaEntry, EncyclopediaStack, FamilyTree, Location, ManuscriptIndexData, PlotThread, ResearchEntry, StoryMap, StoryMapLabel, StoryMapPath, StoryMapPin, StoryMapRegion, ThemeId, TrashedBook, BetaMemoryNote, BetaReview, CritiqueMemoryNote, CritiquePackId, CritiqueReview } from "@/lib/types";
 import {
   createId,
   createBookInLibrary,
@@ -86,6 +86,8 @@ import {
   replaceChapterHeading,
   syncChapterTitleField,
 } from "@/lib/chapterHeading";
+import { moveChapterBetweenBooks } from "@/lib/chapters";
+import { appendPrivateNote } from "@/lib/developmentalEditor";
 import { countWords } from "@/lib/utils";
 import { flushManuscriptPending } from "@/lib/manuscriptPendingFlush";
 import {
@@ -163,6 +165,7 @@ import {
 import {
   createSoundtrackSong,
   nextSoundtrackOrder,
+  normalizeSoundtrackTaste,
   sortSoundtrackSongs,
 } from "@/lib/soundtrack";
 import {
@@ -232,15 +235,27 @@ interface BookContextValue {
   hydrated: boolean;
   setTitle: (title: string) => void;
   setAuthor: (author: string) => void;
+  updateCompileSettings: (settings: BookCompileSettings) => void;
+  updateFrontMatter: (partial: Partial<BookFrontMatter>) => void;
   /** Pass chapterId when flushing from an editor instance so chapter switches don't mis-attribute prose. */
   updateChapterContent: (content: string, chapterId?: string) => void;
   updateChapterTitle: (chapterId: string, title: string) => void;
+  updateChapterCompile: (
+    chapterId: string,
+    partial: ChapterCompileSettings,
+  ) => void;
   updateChapterSummary: (chapterId: string, summary: string) => void;
   updateChapterNotes: (notes: string) => void;
+  appendChapterNotes: (chapterId: string, addition: string) => void;
   addChapter: (afterChapterId?: string) => void;
   /** Retitle “Chapter N” entries to match current order (custom names left alone). */
   renumberChapters: () => void;
   deleteChapter: (chapterId: string) => void;
+  moveChapterToBook: (
+    chapterId: string,
+    targetBookId: string,
+    options?: { insertIndex?: number },
+  ) => { movedChapterId: string; targetBookId: string } | null;
   deleteManuscript: () => void;
   /** Library shelf — all manuscripts in this browser. */
   libraryBooks: Book[];
@@ -528,7 +543,12 @@ interface BookContextValue {
   ) => void;
   deleteSoundtrackSong: (songId: string) => void;
   moveSoundtrackSong: (songId: string, direction: "up" | "down") => void;
-  applySoundtrackFromClaude: (payload: SoundtrackComposePayload) => void;
+  /** Author taste seeds — up to 4 favorite artists for Clarence. */
+  setSoundtrackTaste: (artists: string[]) => void;
+  applySoundtrackFromClaude: (
+    payload: SoundtrackComposePayload,
+    mode?: "merge" | "replace",
+  ) => void;
   /** Apply a developmental-editor pass (flags + memory). Never rewrites prose. */
   applyDevelopmentalReview: (
     pass: DevelopmentalPass,
@@ -561,8 +581,13 @@ interface BookContextValue {
   applyCritiqueReview: (
     review: CritiqueReview,
     memoryUpdates: CritiqueMemoryNote[],
+    options?: { mergeItems?: boolean },
   ) => void;
-  clearCritiqueMemory: () => void;
+  clearCritiqueMemory: (packId?: CritiquePackId) => void;
+  clearCritiqueReviewForChapter: (
+    packId: CritiquePackId,
+    chapterId: string,
+  ) => void;
   clearCritiqueReviews: () => void;
   selectDumpPage: (pageId: string) => void;
   addDumpPage: (title?: string) => string;
@@ -1280,6 +1305,16 @@ export function BookProvider({ children }: { children: ReactNode }) {
       hydrated,
       setTitle: (title) => updateBook((b) => ({ ...b, title })),
       setAuthor: (author) => updateBook((b) => ({ ...b, author })),
+      updateCompileSettings: (settings) =>
+        updateBook((b) => ({
+          ...b,
+          compileSettings: { ...(b.compileSettings ?? {}), ...settings },
+        })),
+      updateFrontMatter: (partial) =>
+        updateBook((b) => ({
+          ...b,
+          frontMatter: { ...(b.frontMatter ?? {}), ...partial },
+        })),
       updateChapterContent: (content, chapterId) =>
         updateBook((b) => {
           const targetId = chapterId ?? b.activeChapterId;
@@ -1312,6 +1347,19 @@ export function BookProvider({ children }: { children: ReactNode }) {
             return { ...c, title: trimmed, content, updatedAt: Date.now() };
           }),
         })),
+      updateChapterCompile: (chapterId, partial) =>
+        updateBook((b) => ({
+          ...b,
+          chapters: b.chapters.map((c) =>
+            c.id === chapterId
+              ? {
+                  ...c,
+                  compile: { ...(c.compile ?? {}), ...partial },
+                  updatedAt: Date.now(),
+                }
+              : c,
+          ),
+        })),
       updateChapterSummary: (chapterId, summary) =>
         updateBook((b) => ({
           ...b,
@@ -1327,6 +1375,19 @@ export function BookProvider({ children }: { children: ReactNode }) {
           chapters: b.chapters.map((c) =>
             c.id === b.activeChapterId
               ? { ...c, notes, updatedAt: Date.now() }
+              : c,
+          ),
+        })),
+      appendChapterNotes: (chapterId, addition) =>
+        updateBook((b) => ({
+          ...b,
+          chapters: b.chapters.map((c) =>
+            c.id === chapterId
+              ? {
+                  ...c,
+                  notes: appendPrivateNote(c.notes ?? "", addition),
+                  updatedAt: Date.now(),
+                }
               : c,
           ),
         })),
@@ -1383,6 +1444,49 @@ export function BookProvider({ children }: { children: ReactNode }) {
       },
       deleteChapter: (chapterId) =>
         updateBook((b) => trashChapterFromBook(b, chapterId)),
+      moveChapterToBook: (chapterId, targetBookId, options) => {
+        if (!book?.seriesId) return null;
+        const target = libraryBooks.find((b) => b.id === targetBookId);
+        if (!target || target.id === book.id) return null;
+        if (target.seriesId !== book.seriesId) return null;
+
+        saveBook(book);
+        const result = moveChapterBetweenBooks(
+          book,
+          target,
+          chapterId,
+          options,
+        );
+        if (!result) return null;
+
+        const lib = loadLibrary();
+        const books = lib.books.map((b) => {
+          if (b.id === result.source.id) return result.source;
+          if (b.id === result.target.id) return result.target;
+          return b;
+        });
+        saveLibrary({ ...lib, books, activeBookId: book.id });
+        setLibraryBooks(books);
+
+        skipDirtyRef.current = true;
+        setBook(result.source);
+        syncLibraryMeta(result.source);
+        const wc = result.source.chapters.reduce(
+          (sum, ch) => sum + countWords(ch.content ?? ""),
+          0,
+        );
+        setSessionBaseline(wc);
+        setIsDirty(false);
+        setLastSavedAt(Date.now());
+        window.setTimeout(() => {
+          skipDirtyRef.current = false;
+        }, 0);
+
+        return {
+          movedChapterId: result.movedChapterId,
+          targetBookId: result.target.id,
+        };
+      },
       deleteManuscript: () => {
         if (!book) return;
         const { active, library } = deleteBookToTrash(book.id);
@@ -2831,10 +2935,23 @@ export function BookProvider({ children }: { children: ReactNode }) {
             updatedAt: Date.now(),
           };
         }),
-      applySoundtrackFromClaude: (payload) =>
+      setSoundtrackTaste: (artists) =>
         updateBook((b) => ({
           ...b,
-          soundtrack: applySoundtrackCompose(b.soundtrack ?? [], payload),
+          soundtrackTaste: normalizeSoundtrackTaste(artists),
+          updatedAt: Date.now(),
+        })),
+      applySoundtrackFromClaude: (payload, mode = "merge") =>
+        updateBook((b) => ({
+          ...b,
+          soundtrack: applySoundtrackCompose(
+            b.soundtrack ?? [],
+            payload,
+            mode,
+          ),
+          soundtrackArc:
+            payload.arcBlurb?.trim() ||
+            (mode === "replace" ? "" : b.soundtrackArc ?? ""),
           updatedAt: Date.now(),
         })),
       applyDevelopmentalReview: (pass, memoryUpdates) =>
@@ -2931,21 +3048,34 @@ export function BookProvider({ children }: { children: ReactNode }) {
             reviews: [],
           },
         })),
-      applyCritiqueReview: (review, memoryUpdates) =>
+      applyCritiqueReview: (review, memoryUpdates, options) =>
         updateBook((b) => ({
           ...b,
           critique: mergeCritiqueReview(
             b.critique ?? { memory: [], reviews: [] },
             review,
             memoryUpdates,
+            options,
           ),
         })),
-      clearCritiqueMemory: () =>
+      clearCritiqueMemory: (packId) =>
         updateBook((b) => ({
           ...b,
           critique: {
             ...(b.critique ?? { memory: [], reviews: [] }),
-            memory: [],
+            memory: packId
+              ? (b.critique?.memory ?? []).filter((m) => m.packId !== packId)
+              : [],
+          },
+        })),
+      clearCritiqueReviewForChapter: (packId, chapterId) =>
+        updateBook((b) => ({
+          ...b,
+          critique: {
+            ...(b.critique ?? { memory: [], reviews: [] }),
+            reviews: (b.critique?.reviews ?? []).filter(
+              (r) => !(r.packId === packId && r.chapterId === chapterId),
+            ),
           },
         })),
       clearCritiqueReviews: () =>

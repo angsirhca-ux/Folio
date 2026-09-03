@@ -3,10 +3,13 @@ import type { Book, Chapter } from "@/lib/types";
 import {
   applySceneBreakStyle,
   chaptersForCompile,
-  defaultCompileOptions,
+  compileOptionsForBook,
+  frontMatterSections,
+  partDividerForChapter,
   type CompileOptions,
 } from "./compile";
 import {
+  blockPlainText,
   bookFilename,
   downloadBlob,
   parseChapterBlocks,
@@ -194,7 +197,7 @@ class NovelPdf {
     this.y += gapAfter;
   }
 
-  renderParagraph(text: string, indent: boolean) {
+  renderParagraph(text: string, indent: boolean, leftAlign = false) {
     const fontSize = 11;
     const lineHeight = fontSize * 1.7;
     const maxW = contentWidth();
@@ -212,7 +215,11 @@ class NovelPdf {
 
     for (const line of lines) {
       this.ensureSpace(lineHeight);
-      this.doc.text(line.text, line.x, this.y);
+      if (leftAlign) {
+        this.doc.text(line.text, PAGE.marginLeft, this.y);
+      } else {
+        this.doc.text(line.text, line.x, this.y);
+      }
       this.y += lineHeight;
     }
   }
@@ -253,34 +260,73 @@ class NovelPdf {
     this.doc.setTextColor(...COLORS.ink);
   }
 
+  renderFrontMatterSection(section: {
+    title: string;
+    paragraphs: string[];
+    attribution?: string;
+    variant?: "copyright";
+  }) {
+    this.addPage();
+    if (section.variant !== "copyright") {
+      this.renderHeading(section.title, 2);
+    }
+    for (const paragraph of section.paragraphs) {
+      this.renderParagraph(
+        paragraph,
+        false,
+        section.variant === "copyright",
+      );
+    }
+    if (section.attribution) {
+      this.renderBlockquote(section.attribution);
+    }
+  }
+
+  renderPartDivider(label: string) {
+    this.addPage();
+    this.renderHeading(label, 1);
+  }
+
   renderBlocks(blocks: ManuscriptBlock[]) {
     let previous: ManuscriptBlock["type"] | null = null;
 
     for (const block of blocks) {
+      const text = blockPlainText(block);
       if (block.type === "heading") {
-        this.renderHeading(block.text, block.level ?? 1);
+        this.renderHeading(text, block.level ?? 1);
       } else if (block.type === "scene-break") {
-        this.renderSceneBreak(block.text);
+        this.renderSceneBreak(text);
       } else if (block.type === "blockquote") {
-        this.renderBlockquote(block.text);
+        this.renderBlockquote(text);
       } else {
         const shouldIndent =
           previous === "paragraph" || previous === "blockquote";
-        this.renderParagraph(block.text, shouldIndent);
+        this.renderParagraph(text, shouldIndent);
       }
       previous = block.type;
     }
   }
 
-  renderChapter(chapter: Chapter, options: CompileOptions, startNewPage: boolean) {
-    if (startNewPage) this.addPage();
+  renderChapter(
+    chapter: Chapter,
+    options: CompileOptions,
+    startNewPage: boolean,
+    chapters: Chapter[],
+    index: number,
+  ) {
+    const part = partDividerForChapter(chapters, index);
+    if (part) {
+      this.renderPartDivider(part);
+    } else if (startNewPage || chapter.compile?.pageBreakBefore) {
+      this.addPage();
+    }
 
     const blocks = applySceneBreakStyle(
       parseChapterBlocks(chapter.content),
       options.sceneBreak,
     );
     const hasH1 = blocks.some((b) => b.type === "heading" && b.level === 1);
-    if (!hasH1) {
+    if (!hasH1 && !chapter.compile?.suppressTitle) {
       this.renderHeading(chapter.title || "Chapter", 1);
     }
     this.renderBlocks(blocks);
@@ -294,20 +340,26 @@ class NovelPdf {
 
 export async function buildPdf(
   book: Book,
-  options: CompileOptions = defaultCompileOptions(book),
+  options: CompileOptions = compileOptionsForBook(book),
 ): Promise<Blob> {
   const title = book.title.trim() || "Untitled Manuscript";
   const author = book.author.trim();
   const chapters = chaptersForCompile(book, options);
   const pdf = new NovelPdf();
+  const fm = frontMatterSections(book, options);
 
   if (options.includeTitlePage) {
     pdf.titlePage(title, author);
   }
 
+  for (const section of fm) {
+    pdf.renderFrontMatterSection(section);
+  }
+
   chapters.forEach((chapter, index) => {
-    const startNewPage = options.includeTitlePage || index > 0;
-    pdf.renderChapter(chapter, options, startNewPage);
+    const startNewPage =
+      options.includeTitlePage || fm.length > 0 || index > 0;
+    pdf.renderChapter(chapter, options, startNewPage, chapters, index);
   });
 
   return pdf.finalize();
@@ -317,7 +369,7 @@ export async function exportPdf(
   book: Book,
   options?: CompileOptions,
 ): Promise<void> {
-  const opts = options ?? defaultCompileOptions(book);
+  const opts = options ?? compileOptionsForBook(book);
   const blob = await buildPdf(book, opts);
   downloadBlob(blob, bookFilename(book, "pdf"));
 }

@@ -26,6 +26,7 @@ import { DevelopmentalPanel } from "@/components/Editor/DevelopmentalPanel";
 import { BackupDialog } from "@/components/Backup/BackupDialog";
 import { useManuscriptEditor } from "@/providers/ManuscriptEditorContext";
 import { ExportDialog } from "@/components/Export/ExportDialog";
+import { BookPreviewDialog } from "@/components/Export/BookPreviewDialog";
 import { FocusModeIndicator } from "@/components/FocusMode/FocusMode";
 import { ImportDialog } from "@/components/Import/ImportDialog";
 import { NotesPanel } from "@/components/Notes/NotesPanel";
@@ -61,6 +62,7 @@ export function WritingApp() {
   } = useBook();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
@@ -152,6 +154,18 @@ export function WritingApp() {
     [router],
   );
 
+  function openCritique() {
+    setNotesOpen(false);
+    setInspectorOpen(false);
+    setResearchOpen(false);
+    setEncyclopediaOpen(false);
+    setGoalsOpen(false);
+    setEditorOpen(false);
+    setBetaOpen(false);
+    setActiveReviewFlagId(null);
+    setCritiqueOpen(true);
+  }
+
   const handlers = useMemo(
     () => ({
       onToggleFocus: toggleFocusMode,
@@ -179,6 +193,13 @@ export function WritingApp() {
         setEncyclopediaOpen(false);
         setGoalsOpen((v) => !v);
       },
+      onToggleCritique: () => {
+        if (critiqueOpen) {
+          setCritiqueOpen(false);
+          return;
+        }
+        openCritique();
+      },
       onToggleInspector: () => {
         if (inspectorOpen) {
           setInspectorOpen(false);
@@ -201,6 +222,7 @@ export function WritingApp() {
         openEncyclopedia();
       },
       onOpenExport: () => setExportOpen(true),
+      onOpenPreview: () => setPreviewOpen(true),
       onOpenImport: () => setImportOpen(true),
       onSave: saveNow,
       onChapterUp: () => selectAdjacentChapter("up"),
@@ -215,6 +237,7 @@ export function WritingApp() {
       inspectorOpen,
       researchOpen,
       encyclopediaOpen,
+      critiqueOpen,
       activeChapter,
       sceneFocus,
       inspectorSceneId,
@@ -440,21 +463,11 @@ export function WritingApp() {
           variant="ghost"
           size="icon-sm"
           aria-label="Critique"
-          onClick={() => {
-            setNotesOpen(false);
-            setInspectorOpen(false);
-            setResearchOpen(false);
-            setEncyclopediaOpen(false);
-            setGoalsOpen(false);
-            setEditorOpen(false);
-            setBetaOpen(false);
-            setActiveReviewFlagId(null);
-            setCritiqueOpen(true);
-          }}
+          onClick={openCritique}
           className={
             hasCritiqueReview || critiqueOpen ? "text-[var(--accent)]" : ""
           }
-          title="Critique — checklist only, never rewrites"
+          title="Critique — checklist only, never rewrites (⌘⇧C)"
         >
           <ClipboardCheck className="h-4 w-4" strokeWidth={1.5} />
         </Button>
@@ -601,9 +614,24 @@ export function WritingApp() {
         editor={editor}
       />
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
-      <ExportDialog open={exportOpen} onOpenChange={setExportOpen} />
+      <ExportDialog
+        open={exportOpen}
+        onOpenChange={setExportOpen}
+        onPreview={() => {
+          setExportOpen(false);
+          setPreviewOpen(true);
+        }}
+      />
+      <BookPreviewDialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        onOpenExport={() => {
+          setPreviewOpen(false);
+          setExportOpen(true);
+        }}
+      />
       <BackupDialog open={backupOpen} onOpenChange={setBackupOpen} />
-      <WordToolsHost />
+      <WordToolsHost editor={editor} />
       <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

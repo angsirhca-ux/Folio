@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlignLeft,
   BookOpen,
@@ -22,8 +22,9 @@ import {
   SCENE_BREAK_OPTIONS,
   applyCompilePreset,
   allChapterIds,
+  compileOptionsForBook,
+  compileSettingsFromOptions,
   compileWordCount,
-  defaultCompileOptions,
   type CompileOptions,
   type CompilePreset,
   type SceneBreakStyle,
@@ -37,6 +38,7 @@ import { formatWordCount, cn } from "@/lib/utils";
 interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onPreview?: () => void;
 }
 
 type ExportFormat = "epub" | "pdf" | "docx" | "txt";
@@ -74,29 +76,51 @@ const FORMATS: {
   },
 ];
 
-export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
-  const { book } = useBook();
+export function ExportDialog({
+  open,
+  onOpenChange,
+  onPreview,
+}: ExportDialogProps) {
+  const { book, updateCompileSettings, updateFrontMatter, updateChapterCompile } =
+    useBook();
   const [state, setState] = useState<ExportState>("idle");
   const [active, setActive] = useState<ExportFormat | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [options, setOptions] = useState<CompileOptions>(() =>
-    defaultCompileOptions(book),
+  const [expandedChapterId, setExpandedChapterId] = useState<string | null>(
+    null,
   );
+  const [options, setOptions] = useState<CompileOptions>(() =>
+    compileOptionsForBook(book),
+  );
+  const persistTimer = useRef<number | null>(null);
 
   const chapterIdsKey = book.chapters.map((c) => c.id).join("|");
+  const frontMatter = book.frontMatter ?? {};
 
-  // Reset compile selection when the dialog opens or the chapter list changes.
   useEffect(() => {
     if (!open) return;
     setOptions((prev) => {
-      const ids = allChapterIds(book);
-      const kept = prev.chapterIds.filter((id) => ids.includes(id));
+      const merged = compileOptionsForBook(book);
+      const kept = prev.chapterIds.filter((id) =>
+        book.chapters.some((c) => c.id === id),
+      );
       return {
-        ...prev,
-        chapterIds: kept.length ? kept : ids,
+        ...merged,
+        chapterIds: kept.length ? kept : merged.chapterIds,
       };
     });
   }, [open, book, chapterIdsKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (persistTimer.current) window.clearTimeout(persistTimer.current);
+    persistTimer.current = window.setTimeout(() => {
+      updateCompileSettings(compileSettingsFromOptions(options));
+    }, 400);
+    return () => {
+      if (persistTimer.current) window.clearTimeout(persistTimer.current);
+    };
+  }, [open, options, updateCompileSettings]);
 
   const selectedCount = options.chapterIds.length;
   const selectedWords = useMemo(
@@ -106,26 +130,49 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
   const title = book.title.trim() || "Untitled Manuscript";
   const canExport = selectedCount > 0 && state !== "working";
 
+  function patchOptions(patch: Partial<CompileOptions>) {
+    setOptions((prev) => ({ ...prev, ...patch }));
+  }
+
   function setPreset(preset: CompilePreset) {
     setOptions((prev) => applyCompilePreset(preset, prev));
   }
 
   function toggleChapter(id: string) {
+    const ch = book.chapters.find((c) => c.id === id);
+    if (ch?.compile?.omitFromExport) return;
     setOptions((prev) => {
       const has = prev.chapterIds.includes(id);
       const chapterIds = has
         ? prev.chapterIds.filter((x) => x !== id)
-        : [
-            ...book.chapters
-              .map((c) => c.id)
-              .filter((cid) => prev.chapterIds.includes(cid) || cid === id),
-          ];
+        : book.chapters
+            .map((c) => c.id)
+            .filter(
+              (cid) => prev.chapterIds.includes(cid) || cid === id,
+            );
       return { ...prev, chapterIds };
     });
   }
 
+  function setChapterOmit(id: string, omit: boolean) {
+    updateChapterCompile(id, { omitFromExport: omit });
+    setOptions((prev) => ({
+      ...prev,
+      chapterIds: omit
+        ? prev.chapterIds.filter((cid) => cid !== id)
+        : book.chapters
+            .map((c) => c.id)
+            .filter((cid) => prev.chapterIds.includes(cid) || cid === id),
+    }));
+  }
+
   function selectAllChapters() {
-    setOptions((prev) => ({ ...prev, chapterIds: allChapterIds(book) }));
+    setOptions((prev) => ({
+      ...prev,
+      chapterIds: book.chapters
+        .filter((c) => !c.compile?.omitFromExport)
+        .map((c) => c.id),
+    }));
   }
 
   function selectNoneChapters() {
@@ -134,6 +181,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
 
   async function runExport(format: ExportFormat) {
     if (!canExport) return;
+    updateCompileSettings(compileSettingsFromOptions(options));
     setActive(format);
     setState("working");
     setError(null);
@@ -174,8 +222,8 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
           <DialogHeader className="mb-0">
             <DialogTitle>Compile &amp; export</DialogTitle>
             <DialogDescription className="mt-1.5">
-              Choose what goes in the book — then save it as EPUB, PDF, Word, or
-              text.
+              Format choices save with this book — front matter, breaks, and
+              preset carry over next time.
             </DialogDescription>
           </DialogHeader>
         </div>
@@ -198,6 +246,19 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
               ) : null}
             </p>
           </div>
+
+          {onPreview ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onPreview}
+              className="w-full gap-1.5"
+            >
+              <BookOpen className="h-3.5 w-3.5" strokeWidth={1.5} />
+              Preview book
+            </Button>
+          ) : null}
 
           <section className="space-y-2">
             <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
@@ -249,29 +310,105 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 </button>
               </div>
             </div>
-            <ul className="max-h-36 space-y-0.5 overflow-y-auto rounded-xl border border-[var(--border)] p-1.5 folio-scroll">
+            <ul className="max-h-52 space-y-0.5 overflow-y-auto rounded-xl border border-[var(--border)] p-1.5 folio-scroll">
               {book.chapters.map((ch, i) => {
                 const checked = options.chapterIds.includes(ch.id);
+                const omitted = Boolean(ch.compile?.omitFromExport);
+                const expanded = expandedChapterId === ch.id;
                 return (
-                  <li key={ch.id}>
-                    <label
+                  <li key={ch.id} className="rounded-lg">
+                    <div
                       className={cn(
-                        "flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors",
-                        checked
+                        "flex items-center gap-1 rounded-lg px-1 py-0.5",
+                        checked && !omitted
                           ? "bg-[rgba(45,42,38,0.04)]"
-                          : "opacity-60 hover:opacity-100",
+                          : omitted
+                            ? "opacity-50"
+                            : "opacity-80",
                       )}
                     >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleChapter(ch.id)}
-                        className="h-3.5 w-3.5 accent-[var(--accent)]"
-                      />
-                      <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
-                        {ch.title?.trim() || `Chapter ${i + 1}`}
-                      </span>
-                    </label>
+                      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 px-1 py-1">
+                        <input
+                          type="checkbox"
+                          checked={checked && !omitted}
+                          disabled={omitted}
+                          onChange={() => toggleChapter(ch.id)}
+                          className="h-3.5 w-3.5 accent-[var(--accent)]"
+                        />
+                        <span className="min-w-0 flex-1 truncate font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                          {ch.title?.trim() || `Chapter ${i + 1}`}
+                          {omitted ? (
+                            <span className="ml-1.5 text-[0.65rem] uppercase tracking-[0.1em] text-[var(--ink-faint)]">
+                              Skipped
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        aria-label="Chapter format"
+                        onClick={() =>
+                          setExpandedChapterId((id) =>
+                            id === ch.id ? null : ch.id,
+                          )
+                        }
+                        className="shrink-0 rounded-md px-2 py-1 font-[family-name:var(--font-ui)] text-[0.65rem] text-[var(--ink-faint)] hover:text-[var(--ink)]"
+                      >
+                        {expanded ? "−" : "Format"}
+                      </button>
+                    </div>
+                    {expanded ? (
+                      <div className="mb-1 space-y-2 border-t border-[rgba(45,42,38,0.06)] px-3 py-2">
+                        <label className="flex items-center justify-between gap-2 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
+                          Skip in export
+                          <input
+                            type="checkbox"
+                            checked={omitted}
+                            onChange={(e) =>
+                              setChapterOmit(ch.id, e.target.checked)
+                            }
+                            className="h-3.5 w-3.5 accent-[var(--accent)]"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
+                          New page before
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ch.compile?.pageBreakBefore)}
+                            onChange={(e) =>
+                              updateChapterCompile(ch.id, {
+                                pageBreakBefore: e.target.checked,
+                              })
+                            }
+                            className="h-3.5 w-3.5 accent-[var(--accent)]"
+                          />
+                        </label>
+                        <label className="flex items-center justify-between gap-2 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-muted)]">
+                          Hide chapter title
+                          <input
+                            type="checkbox"
+                            checked={Boolean(ch.compile?.suppressTitle)}
+                            onChange={(e) =>
+                              updateChapterCompile(ch.id, {
+                                suppressTitle: e.target.checked,
+                              })
+                            }
+                            className="h-3.5 w-3.5 accent-[var(--accent)]"
+                          />
+                        </label>
+                        <input
+                          type="text"
+                          value={ch.compile?.partLabel ?? ""}
+                          onChange={(e) =>
+                            updateChapterCompile(ch.id, {
+                              partLabel: e.target.value,
+                            })
+                          }
+                          placeholder="Part label — e.g. Part II"
+                          className="w-full rounded-md border border-[var(--border)] bg-[var(--paper)] px-2 py-1.5 font-[family-name:var(--font-ui)] text-xs text-[var(--ink)] placeholder:text-[var(--ink-faint)]"
+                        />
+                      </div>
+                    ) : null}
                   </li>
                 );
               })}
@@ -290,10 +427,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                 type="checkbox"
                 checked={options.includeTitlePage}
                 onChange={(e) =>
-                  setOptions((prev) => ({
-                    ...prev,
-                    includeTitlePage: e.target.checked,
-                  }))
+                  patchOptions({ includeTitlePage: e.target.checked })
                 }
                 className="h-3.5 w-3.5 accent-[var(--accent)]"
               />
@@ -308,15 +442,93 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
               <input
                 type="checkbox"
                 checked={options.includeToc}
+                onChange={(e) => patchOptions({ includeToc: e.target.checked })}
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+              />
+            </label>
+            <label className="flex cursor-pointer items-center justify-between gap-3">
+              <span className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                Epigraph
+              </span>
+              <input
+                type="checkbox"
+                checked={options.includeEpigraph}
                 onChange={(e) =>
-                  setOptions((prev) => ({
-                    ...prev,
-                    includeToc: e.target.checked,
-                  }))
+                  patchOptions({ includeEpigraph: e.target.checked })
                 }
                 className="h-3.5 w-3.5 accent-[var(--accent)]"
               />
             </label>
+            {options.includeEpigraph ? (
+              <div className="space-y-2 pl-1">
+                <textarea
+                  value={frontMatter.epigraph ?? ""}
+                  onChange={(e) =>
+                    updateFrontMatter({ epigraph: e.target.value })
+                  }
+                  rows={3}
+                  placeholder="Opening quote…"
+                  className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--paper)] px-3 py-2 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)]"
+                />
+                <input
+                  type="text"
+                  value={frontMatter.epigraphAttribution ?? ""}
+                  onChange={(e) =>
+                    updateFrontMatter({ epigraphAttribution: e.target.value })
+                  }
+                  placeholder="Attribution — Author, Work"
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--paper)] px-3 py-2 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)]"
+                />
+              </div>
+            ) : null}
+            <label className="flex cursor-pointer items-center justify-between gap-3">
+              <span className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                Dedication
+              </span>
+              <input
+                type="checkbox"
+                checked={options.includeDedication}
+                onChange={(e) =>
+                  patchOptions({ includeDedication: e.target.checked })
+                }
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+              />
+            </label>
+            {options.includeDedication ? (
+              <textarea
+                value={frontMatter.dedication ?? ""}
+                onChange={(e) =>
+                  updateFrontMatter({ dedication: e.target.value })
+                }
+                rows={3}
+                placeholder="For…"
+                className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--paper)] px-3 py-2 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)]"
+              />
+            ) : null}
+            <label className="flex cursor-pointer items-center justify-between gap-3">
+              <span className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                Copyright
+              </span>
+              <input
+                type="checkbox"
+                checked={options.includeCopyright}
+                onChange={(e) =>
+                  patchOptions({ includeCopyright: e.target.checked })
+                }
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+              />
+            </label>
+            {options.includeCopyright ? (
+              <textarea
+                value={frontMatter.copyright ?? ""}
+                onChange={(e) =>
+                  updateFrontMatter({ copyright: e.target.value })
+                }
+                rows={4}
+                placeholder="Copyright © 2026…"
+                className="w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--paper)] px-3 py-2 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)]"
+              />
+            ) : null}
 
             <div>
               <p className="mb-1.5 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
@@ -329,10 +541,7 @@ export function ExportDialog({ open, onOpenChange }: ExportDialogProps) {
                     type="button"
                     title={opt.hint}
                     onClick={() =>
-                      setOptions((prev) => ({
-                        ...prev,
-                        sceneBreak: opt.id as SceneBreakStyle,
-                      }))
+                      patchOptions({ sceneBreak: opt.id as SceneBreakStyle })
                     }
                     className={cn(
                       "rounded-full border px-2.5 py-1 font-[family-name:var(--font-ui)] text-xs transition-colors",

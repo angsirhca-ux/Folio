@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ChevronDown, Loader2, Users, X } from "lucide-react";
+import { ChevronDown, Loader2, Users, X, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -17,9 +17,17 @@ import { useClaudeStatus } from "@/hooks/useClaudeEnrichment";
 import { CLARENCE } from "@/lib/clarence";
 import {
   BETA_CRAFT_QUESTIONS,
+  DEFAULT_BETA_READERS,
+  MANUSCRIPT_BETA_CHAPTER_ID,
+  MANUSCRIPT_BETA_TITLE,
+  craftQuestionsForStoredReview,
+  isLastChapterInBook,
   latestBetaReview,
+  latestManuscriptBetaReview,
   memoryForReader,
+  partitionManuscriptBetaWindows,
 } from "@/lib/betaReaders";
+import { AI_CHAPTER_TIMEOUT_MS, AI_WINDOW_TIMEOUT_MS } from "@/lib/ai/timeouts";
 import { formatRelativeDate } from "@/lib/scenes";
 import {
   BETA_EMOTION_META,
@@ -27,22 +35,35 @@ import {
   type BetaMemoryNote,
   type BetaReaderPersona,
   type BetaReview,
+  type BetaReaction,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-async function runBetaRead(args: {
-  book: {
+type BetaBookSlice = {
+  title: string;
+  author: string;
+  characters: unknown[];
+  chapters: Array<{
+    id: string;
     title: string;
-    author: string;
-    characters: unknown[];
-    chapters: unknown[];
-  };
+    content: string;
+    summary?: string;
+  }>;
+};
+
+async function runBetaReadChapter(args: {
+  book: BetaBookSlice;
   chapter: {
     id: string;
     title: string;
     content: string;
     summary: string;
   };
+  previousChapter?: {
+    id: string;
+    title: string;
+    content: string;
+  } | null;
   reader: BetaReaderPersona;
   memory: BetaMemoryNote[];
   reviews: BetaReview[];
@@ -51,7 +72,7 @@ async function runBetaRead(args: {
   const res = await fetch("/api/editor/beta-read", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(args),
+    body: JSON.stringify({ mode: "chapter", ...args }),
     signal: args.signal,
   });
   const data = (await res.json()) as {
@@ -68,7 +89,102 @@ async function runBetaRead(args: {
   };
 }
 
-const AI_FETCH_TIMEOUT_MS = 280_000;
+async function runManuscriptBetaRead(args: {
+  book: BetaBookSlice;
+  reader: BetaReaderPersona;
+  memory: BetaMemoryNote[];
+  reviews: BetaReview[];
+  onWindow?: (info: { index: number; total: number; label: string }) => void;
+  outerSignal?: AbortSignal;
+}): Promise<{ review: BetaReview; memoryUpdates: BetaMemoryNote[] }> {
+  const windows = partitionManuscriptBetaWindows(
+    args.book.chapters.map((c) => ({
+      title: c.title,
+      content: c.content,
+    })),
+  );
+  if (windows.length === 0) {
+    throw new Error("No readable chapters found in this manuscript.");
+  }
+
+  let stretchReactions: BetaReaction[] = [];
+  let previousWindowEnding = "";
+  let memory = args.memory;
+  const allMemoryUpdates: BetaMemoryNote[] = [];
+
+  for (let windowIndex = 0; windowIndex < windows.length; windowIndex++) {
+    if (args.outerSignal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
+
+    const reviewWindow = windows[windowIndex]!;
+    args.onWindow?.({
+      index: windowIndex,
+      total: windows.length,
+      label: reviewWindow.label,
+    });
+
+    const controller = new AbortController();
+    const onOuterAbort = () => controller.abort();
+    args.outerSignal?.addEventListener("abort", onOuterAbort);
+    const timeoutId = globalThis.setTimeout(
+      () => controller.abort(),
+      AI_WINDOW_TIMEOUT_MS,
+    );
+
+    try {
+      const res = await fetch("/api/editor/beta-read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "manuscript",
+          manuscriptStep: {
+            windowIndex,
+            stretchReactions,
+            previousWindowEnding: previousWindowEnding || undefined,
+          },
+          book: args.book,
+          reader: args.reader,
+          memory,
+          reviews: args.reviews,
+        }),
+        signal: controller.signal,
+      });
+
+      const data = (await res.json()) as {
+        done?: boolean;
+        review?: BetaReview;
+        memoryUpdates?: BetaMemoryNote[];
+        stretchReactions?: BetaReaction[];
+        previousWindowEnding?: string;
+        error?: string;
+      };
+
+      if (!res.ok) {
+        throw new Error(data.error || "Manuscript beta read failed.");
+      }
+
+      if (data.memoryUpdates?.length) {
+        allMemoryUpdates.push(...data.memoryUpdates);
+        memory = [...data.memoryUpdates, ...memory];
+      }
+
+      if (data.done && data.review) {
+        return { review: data.review, memoryUpdates: allMemoryUpdates };
+      }
+
+      stretchReactions = data.stretchReactions ?? stretchReactions;
+      previousWindowEnding = data.previousWindowEnding ?? previousWindowEnding;
+    } finally {
+      globalThis.clearTimeout(timeoutId);
+      args.outerSignal?.removeEventListener("abort", onOuterAbort);
+    }
+  }
+
+  throw new Error("Manuscript beta read did not finish.");
+}
+
+type BetaPanelTab = "chapter" | "manuscript" | "memory";
 
 const EMOTION_TONE: Partial<Record<BetaEmotion, string>> = {
   surprised: "text-[#6B4A2A]",
@@ -111,30 +227,48 @@ export function BetaReadersPanel({
   const readers =
     state.readers.length > 0
       ? state.readers
-      : ([
-          {
-            id: "beta-close-reader",
-            name: "Mara",
-            blurb: "Close literary reader.",
-          },
-        ] as BetaReaderPersona[]);
+      : DEFAULT_BETA_READERS.map((r) => ({ ...r }));
 
   const [selectedId, setSelectedId] = useState(readers[0]?.id ?? "");
   const [busy, setBusy] = useState(false);
+  const [busyMode, setBusyMode] = useState<"chapter" | "manuscript" | null>(
+    null,
+  );
   const [busyElapsedSec, setBusyElapsedSec] = useState(0);
+  const [busyProgress, setBusyProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showMemory, setShowMemory] = useState(false);
+  const [activeTab, setActiveTab] = useState<BetaPanelTab>("chapter");
   const [runsOpen, setRunsOpen] = useState(true);
 
   const selected =
     readers.find((r) => r.id === selectedId) ?? readers[0] ?? null;
 
-  const review = useMemo(
+  const chapterReview = useMemo(
     () =>
       selected
         ? latestBetaReview(state, selected.id, activeChapter.id)
         : undefined,
     [state, selected, activeChapter.id],
+  );
+
+  const manuscriptReview = useMemo(
+    () => (selected ? latestManuscriptBetaReview(state, selected.id) : undefined),
+    [state, selected],
+  );
+
+  const review = activeTab === "manuscript" ? manuscriptReview : chapterReview;
+
+  const closedBookReview = useMemo(() => {
+    if (!review || activeTab === "manuscript") return activeTab === "manuscript";
+    return (
+      review.terminalChapter === true ||
+      review.chapterId === book.chapters.at(-1)?.id
+    );
+  }, [review, activeTab, book.chapters]);
+
+  const isLastChapter = useMemo(
+    () => isLastChapterInBook(book.chapters, activeChapter.id),
+    [book.chapters, activeChapter.id],
   );
 
   const readerMemory = useMemo(
@@ -157,62 +291,111 @@ export function BetaReadersPanel({
     clearBetaReviewForChapter(selected.id, activeChapter.id);
   }
 
-  async function runSelected() {
+  function clearManuscriptFresh() {
+    if (!selected) return;
+    clearBetaReviewForChapter(selected.id, MANUSCRIPT_BETA_CHAPTER_ID);
+  }
+
+  async function runSelected(mode: "chapter" | "manuscript") {
     if (!selected || busy) return;
     setBusy(true);
+    setBusyMode(mode);
     setBusyElapsedSec(0);
+    setBusyProgress(null);
     setError(null);
     const controller = new AbortController();
-    const timeout = window.setTimeout(
-      () => controller.abort(),
-      AI_FETCH_TIMEOUT_MS,
-    );
-    const tick = window.setInterval(() => {
+    let chapterTimeout: ReturnType<typeof globalThis.setTimeout> | undefined;
+    if (mode === "chapter") {
+      chapterTimeout = globalThis.setTimeout(
+        () => controller.abort(),
+        AI_CHAPTER_TIMEOUT_MS,
+      );
+    }
+    const tick = globalThis.setInterval(() => {
       setBusyElapsedSec((s) => s + 1);
     }, 1000);
+    const chapterIndex = book.chapters.findIndex(
+      (c) => c.id === activeChapter.id,
+    );
+    const previous =
+      chapterIndex > 0 ? book.chapters[chapterIndex - 1] : null;
+    const bookSlice = {
+      title: book.title,
+      author: book.author,
+      characters: book.characters ?? [],
+      chapters: book.chapters.map((c) => ({
+        id: c.id,
+        title: c.title,
+        summary: c.summary ?? "",
+        content: c.content,
+      })),
+    };
     try {
-      const { review: next, memoryUpdates } = await runBetaRead({
-        book: {
-          title: book.title,
-          author: book.author,
-          characters: book.characters ?? [],
-          chapters: book.chapters.map((c) => ({
-            id: c.id,
-            title: c.title,
-            summary: c.summary ?? "",
-          })),
-        },
-        chapter: {
-          id: activeChapter.id,
-          title: activeChapter.title,
-          content: activeChapter.content,
-          summary: activeChapter.summary ?? "",
-        },
-        reader: selected,
-        // Prior chapters only — this chapter’s own notes would bias a re-read.
-        memory: readerMemory.filter((m) => m.chapterId !== activeChapter.id),
-        reviews: (state.reviews ?? []).filter(
-          (r) =>
-            r.readerId === selected.id && r.chapterId !== activeChapter.id,
-        ),
-        signal: controller.signal,
-      });
+      const { review: next, memoryUpdates } =
+        mode === "manuscript"
+          ? await runManuscriptBetaRead({
+              book: bookSlice,
+              reader: selected,
+              memory: readerMemory,
+              reviews: (state.reviews ?? []).filter(
+                (r) => r.readerId === selected.id,
+              ),
+              onWindow: ({ index, total, label }) => {
+                setBusyProgress(
+                  total > 1
+                    ? `Part ${index + 1} of ${total} · ${label}`
+                    : label,
+                );
+              },
+              outerSignal: controller.signal,
+            })
+          : await runBetaReadChapter({
+              book: bookSlice,
+              chapter: {
+                id: activeChapter.id,
+                title: activeChapter.title,
+                content: activeChapter.content,
+                summary: activeChapter.summary ?? "",
+              },
+              previousChapter: previous
+                ? {
+                    id: previous.id,
+                    title: previous.title,
+                    content: previous.content,
+                  }
+                : null,
+              reader: selected,
+              memory: readerMemory.filter(
+                (m) => m.chapterId !== activeChapter.id,
+              ),
+              reviews: (state.reviews ?? []).filter(
+                (r) =>
+                  r.readerId === selected.id &&
+                  r.chapterId !== activeChapter.id &&
+                  r.chapterId !== MANUSCRIPT_BETA_CHAPTER_ID,
+              ),
+              signal: controller.signal,
+            });
       applyBetaReview(next, memoryUpdates);
-      setShowMemory(false);
+      setActiveTab(mode);
       setRunsOpen(false);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         setError(
-          "That beta read took too long and was stopped. Try again on a shorter chapter.",
+          mode === "manuscript"
+            ? "That full-manuscript read took too long and was stopped. Try again — very long books read in several windows."
+            : "That beta read took too long and was stopped. Try again on a shorter chapter.",
         );
       } else {
         setError(err instanceof Error ? err.message : "Beta read failed.");
       }
     } finally {
-      window.clearTimeout(timeout);
-      window.clearInterval(tick);
+      if (chapterTimeout != null) globalThis.clearTimeout(chapterTimeout);
+      globalThis.clearInterval(tick);
       setBusy(false);
+      setBusyMode(null);
       setBusyElapsedSec(0);
+      setBusyProgress(null);
     }
   }
 
@@ -234,7 +417,9 @@ export function BetaReadersPanel({
                     Beta readers
                   </p>
                   <h2 className="mt-1 truncate font-[family-name:var(--font-display)] text-lg font-medium tracking-wide text-[var(--ink)]">
-                    {activeChapter.title}
+                    {activeTab === "manuscript"
+                      ? MANUSCRIPT_BETA_TITLE
+                      : activeChapter.title}
                   </h2>
                 </div>
                 <button
@@ -281,9 +466,9 @@ export function BetaReadersPanel({
                     className="overflow-hidden"
                   >
                     <p className="mt-3 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
-                      Beat-by-beat reactions through the chapter, craft answers,
-                      then a closing reader wish (what they’d want emotionally —
-                      or like it as-is). Memory carries forward. Never rewrites.
+                      They read this as the next stretch of the book — did it
+                      follow, stall, or give them the page they wanted after
+                      last chapter. They will not agree. Never rewrites.
                     </p>
 
                     <div className="mt-3 grid gap-2">
@@ -295,7 +480,7 @@ export function BetaReadersPanel({
                             type="button"
                             onClick={() => {
                               setSelectedId(r.id);
-                              setShowMemory(false);
+                              setActiveTab("chapter");
                               setError(null);
                             }}
                             className={cn(
@@ -323,21 +508,62 @@ export function BetaReadersPanel({
                         disabled={
                           busy || !selected || claude?.configured === false
                         }
-                        onClick={() => void runSelected()}
+                        onClick={() => void runSelected("chapter")}
                         className="gap-1.5"
                       >
-                        {busy ? (
+                        {busy && busyMode === "chapter" ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
                           <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
                         )}
-                        {busy
+                        {busy && busyMode === "chapter"
                           ? `${selected?.name ?? "Reader"} is reading…${busyElapsedSec ? ` ${busyElapsedSec}s` : ""}`
-                          : review
-                            ? `Re-read with ${selected?.name ?? "reader"}`
-                            : `Read with ${selected?.name ?? "reader"}`}
+                          : chapterReview
+                            ? isLastChapter
+                              ? `Re-read final chapter`
+                              : `Re-read chapter`
+                            : isLastChapter
+                              ? `Read final chapter`
+                              : `Read this chapter`}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={
+                          busy || !selected || claude?.configured === false
+                        }
+                        onClick={() => void runSelected("manuscript")}
+                        className="gap-1.5"
+                      >
+                        {busy && busyMode === "manuscript" ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <BookOpen className="h-3.5 w-3.5" strokeWidth={1.5} />
+                        )}
+                        {busy && busyMode === "manuscript"
+                          ? `Reading book…${busyProgress ? ` ${busyProgress}` : ""}${busyElapsedSec ? ` (${busyElapsedSec}s)` : ""}`
+                          : manuscriptReview
+                            ? `Re-read full book`
+                            : `Read full book`}
                       </Button>
                     </div>
+
+                    {isLastChapter && activeTab !== "manuscript" ? (
+                      <p className="mt-2 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                        Last chapter in the book — the reader will close the book
+                        here, not wait for more.
+                      </p>
+                    ) : null}
+
+                    {busy && busyMode === "manuscript" ? (
+                      <p className="mt-2 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
+                        {busyProgress
+                          ? busyProgress
+                          : "Starting full-book read…"}
+                        {busyElapsedSec ? ` (${busyElapsedSec}s)` : ""}
+                      </p>
+                    ) : null}
 
                     {claude?.configured === false ? (
                       <p className="mt-3 font-[family-name:var(--font-ui)] text-xs text-[var(--ink-faint)]">
@@ -358,22 +584,37 @@ export function BetaReadersPanel({
             <div className="flex shrink-0 items-center gap-1 border-b border-[rgba(45,42,38,0.08)] px-4 py-2">
               <button
                 type="button"
-                onClick={() => setShowMemory(false)}
+                onClick={() => setActiveTab("chapter")}
                 className={cn(
                   "rounded-full px-3 py-1.5 font-[family-name:var(--font-ui)] text-xs transition-colors",
-                  !showMemory
+                  activeTab === "chapter"
                     ? "bg-[var(--accent-soft)] text-[var(--ink)]"
                     : "text-[var(--ink-faint)] hover:text-[var(--ink-muted)]",
                 )}
               >
-                This chapter
+                {isLastChapter ? "Final chapter" : "This chapter"}
               </button>
               <button
                 type="button"
-                onClick={() => setShowMemory(true)}
+                onClick={() => setActiveTab("manuscript")}
                 className={cn(
                   "rounded-full px-3 py-1.5 font-[family-name:var(--font-ui)] text-xs transition-colors",
-                  showMemory
+                  activeTab === "manuscript"
+                    ? "bg-[var(--accent-soft)] text-[var(--ink)]"
+                    : "text-[var(--ink-faint)] hover:text-[var(--ink-muted)]",
+                )}
+              >
+                Full book
+                {manuscriptReview ? (
+                  <span className="ml-1 text-[var(--accent)]">·</span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("memory")}
+                className={cn(
+                  "rounded-full px-3 py-1.5 font-[family-name:var(--font-ui)] text-xs transition-colors",
+                  activeTab === "memory"
                     ? "bg-[var(--accent-soft)] text-[var(--ink)]"
                     : "text-[var(--ink-faint)] hover:text-[var(--ink-muted)]",
                 )}
@@ -439,7 +680,7 @@ export function BetaReadersPanel({
             </div>
 
             <div className="folio-scroll min-h-0 flex-1 overflow-y-auto px-5 py-5">
-              {showMemory ? (
+              {activeTab === "memory" ? (
                 readerMemory.length === 0 ? (
                   <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
                     No memory yet. After a read, durable impressions land here
@@ -454,11 +695,13 @@ export function BetaReadersPanel({
                       >
                         <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)]">
                           {m.kind}
-                          {m.chapterId === activeChapter.id
-                            ? " · this chapter"
-                            : m.chapterId
-                              ? " · earlier"
-                              : ""}
+                          {m.chapterId === MANUSCRIPT_BETA_CHAPTER_ID
+                            ? " · full book"
+                            : m.chapterId === activeChapter.id
+                              ? " · this chapter"
+                              : m.chapterId
+                                ? " · earlier"
+                                : ""}
                         </p>
                         <p className="mt-1 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
                           {m.text}
@@ -471,7 +714,9 @@ export function BetaReadersPanel({
                 <div className="py-8 text-center">
                   <p className="font-[family-name:var(--font-ui)] text-sm text-[var(--ink-muted)]">
                     {selected
-                      ? `${selected.name} hasn’t read this chapter yet.`
+                      ? activeTab === "manuscript"
+                        ? `${selected.name} hasn’t read the full manuscript yet.`
+                        : `${selected.name} hasn’t read this chapter yet.`
                       : "Pick a reader to begin."}
                   </p>
                   {!runsOpen ? (
@@ -490,6 +735,27 @@ export function BetaReadersPanel({
                     <p className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.16em] text-[var(--ink-faint)]">
                       {selected?.name} · {formatRelativeDate(review.createdAt)}
                     </p>
+                    {review.wouldContinue ? (
+                      <p className="mt-2 font-[family-name:var(--font-ui)] text-sm text-[var(--ink)]">
+                        {activeTab === "manuscript"
+                          ? review.wouldContinue === "yes"
+                            ? "I’d recommend this book."
+                            : review.wouldContinue === "maybe"
+                              ? "I’m on the fence about recommending it."
+                              : "I wouldn’t recommend it as-is."
+                          : closedBookReview
+                            ? review.wouldContinue === "yes"
+                              ? "I’d recommend the book as it stands."
+                              : review.wouldContinue === "maybe"
+                                ? "I’m on the fence about how it lands."
+                                : "I’d have stopped / feel let down here."
+                            : review.wouldContinue === "yes"
+                              ? "I’d keep going tonight."
+                              : review.wouldContinue === "maybe"
+                                ? "I might pick it up later."
+                                : "I’d put it down here."}
+                      </p>
+                    ) : null}
                     <p className="mt-2 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink)]">
                       {review.summary}
                     </p>
@@ -497,7 +763,7 @@ export function BetaReadersPanel({
 
                   <section>
                     <h3 className="font-[family-name:var(--font-display)] text-sm tracking-wide text-[var(--ink)]">
-                      Emotional response
+                      Along the way
                     </h3>
                     <p className="mt-1 font-[family-name:var(--font-ui)] text-[0.7rem] text-[var(--ink-faint)]">
                       {review.reactions.length} beat
@@ -532,10 +798,15 @@ export function BetaReadersPanel({
 
                   <section>
                     <h3 className="font-[family-name:var(--font-display)] text-sm tracking-wide text-[var(--ink)]">
-                      Craft answers
+                      {closedBookReview
+                        ? "When I closed the book"
+                        : "When I finished"}
                     </h3>
                     <ul className="mt-3 space-y-4">
-                      {BETA_CRAFT_QUESTIONS.map((q) => {
+                      {(review
+                        ? craftQuestionsForStoredReview(review, book.chapters)
+                        : BETA_CRAFT_QUESTIONS
+                      ).map((q) => {
                         const answer =
                           review.craftAnswers.find(
                             (a) => a.questionId === q.id,
@@ -573,10 +844,16 @@ export function BetaReadersPanel({
                     onClick={() => {
                       if (
                         window.confirm(
-                          "Clear all beta reviews for this book? Memory stays unless you clear it separately.",
+                          activeTab === "manuscript"
+                            ? `Clear ${selected?.name ?? "this reader"}’s full-manuscript review? Chapter reads stay.`
+                            : "Clear all beta reviews for this book? Memory stays unless you clear it separately.",
                         )
                       ) {
-                        clearBetaReviews();
+                        if (activeTab === "manuscript") {
+                          clearManuscriptFresh();
+                        } else {
+                          clearBetaReviews();
+                        }
                       }
                     }}
                     className="font-[family-name:var(--font-ui)] text-[0.65rem] uppercase tracking-[0.14em] text-[var(--ink-faint)] hover:text-[var(--ink-muted)]"

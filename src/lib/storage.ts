@@ -90,6 +90,8 @@ export function createEmptyBook(): Book {
     encyclopediaStacks: [],
     chronicle: [],
     soundtrack: [],
+    soundtrackArc: "",
+    soundtrackTaste: [],
     trash: [],
     map,
     maps: [map],
@@ -364,6 +366,8 @@ export function createSampleBook(): Book {
     encyclopediaStacks: [customsStack],
     chronicle: [],
     soundtrack: [],
+    soundtrackArc: "",
+    soundtrackTaste: [],
     trash: [],
     map: sampleMapForLocations([
       studyLoc,
@@ -474,6 +478,8 @@ function hydrateBook(
                                     encyclopediaStacks: book.encyclopediaStacks ?? [],
                                     chronicle: book.chronicle ?? [],
                                     soundtrack: book.soundtrack ?? [],
+                                    soundtrackArc: book.soundtrackArc ?? "",
+                                    soundtrackTaste: book.soundtrackTaste ?? [],
                                     familyTrees: book.familyTrees ?? [],
                                     research: book.research ?? [],
                                     chapters: book.chapters.map((c) =>

@@ -17,6 +17,25 @@ export function createSoundtrackSong(
   };
 }
 
+/** Max favorite artists the author can seed into Clarence’s compose. */
+export const MAX_SOUNDTRACK_TASTE = 4;
+
+export function normalizeSoundtrackTaste(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const name = String(item ?? "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name.slice(0, 80));
+    if (out.length >= MAX_SOUNDTRACK_TASTE) break;
+  }
+  return out;
+}
+
 export function sortSoundtrackSongs(songs: SoundtrackSong[]): SoundtrackSong[] {
   return [...songs].sort(
     (a, b) =>
@@ -32,7 +51,11 @@ export function nextSoundtrackOrder(songs: SoundtrackSong[]): number {
 }
 
 export function ensureBookSoundtrack(
-  book: Omit<Book, "soundtrack"> & { soundtrack?: SoundtrackSong[] },
+  book: Omit<Book, "soundtrack" | "soundtrackArc" | "soundtrackTaste"> & {
+    soundtrack?: SoundtrackSong[];
+    soundtrackArc?: string;
+    soundtrackTaste?: string[];
+  },
 ): Book {
   const soundtrack = sortSoundtrackSongs(
     (book.soundtrack ?? []).map((s, i) =>
@@ -46,6 +69,8 @@ export function ensureBookSoundtrack(
   return {
     ...(book as Book),
     soundtrack,
+    soundtrackArc: (book.soundtrackArc ?? "").trim(),
+    soundtrackTaste: normalizeSoundtrackTaste(book.soundtrackTaste),
   };
 }
 

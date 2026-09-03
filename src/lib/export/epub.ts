@@ -1,8 +1,11 @@
 import JSZip from "jszip";
 import type { Book } from "@/lib/types";
+import { epubStylesheet } from "@/lib/format/tokens";
 import {
   chaptersForCompile,
-  defaultCompileOptions,
+  compileOptionsForBook,
+  frontMatterSections,
+  partDividerForChapter,
   type CompileOptions,
 } from "./compile";
 import {
@@ -10,132 +13,10 @@ import {
   chapterToXhtmlBody,
   downloadBlob,
   escapeXml,
+  frontMatterSectionToXhtml,
+  partDividerXhtml,
   sanitizeFilename,
 } from "./manuscript";
-
-const EPUB_CSS = `/* Folio — novel stylesheet for EPUB */
-@namespace epub "http://www.idpf.org/2007/ops";
-
-html {
-  font-size: 100%;
-}
-
-body {
-  font-family: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-  line-height: 1.7;
-  margin: 0;
-  padding: 0;
-  color: #2d2a26;
-  widows: 2;
-  orphans: 2;
-}
-
-h1, h2, h3 {
-  font-family: "Palatino Linotype", Palatino, Georgia, serif;
-  font-weight: normal;
-  text-align: center;
-  line-height: 1.25;
-  page-break-after: avoid;
-  margin: 2.5em 0 1.5em;
-}
-
-h1 {
-  font-size: 1.65em;
-  letter-spacing: 0.04em;
-  font-variant: small-caps;
-  margin-top: 3em;
-}
-
-h2 {
-  font-size: 1.3em;
-}
-
-h3 {
-  font-size: 1.15em;
-}
-
-p {
-  margin: 0;
-  text-align: justify;
-  text-indent: 1.5em;
-  hyphens: auto;
-  -webkit-hyphens: auto;
-}
-
-h1 + p,
-h2 + p,
-h3 + p,
-.scene-break + p,
-blockquote + p {
-  text-indent: 0;
-}
-
-blockquote {
-  margin: 1.4em 1.5em;
-  font-style: italic;
-  color: #5c564f;
-}
-
-blockquote p {
-  text-indent: 0;
-}
-
-.scene-break {
-  display: block;
-  text-align: center;
-  text-align-last: center;
-  text-indent: 0 !important;
-  letter-spacing: normal;
-  margin: 2em 0 !important;
-  color: #6b645c;
-}
-
-.scene-break .scene-break-mark {
-  display: inline-block;
-  letter-spacing: 0.55em;
-  margin-right: -0.55em;
-}
-
-.scene-break-blank {
-  letter-spacing: normal;
-  margin: 1.25em 0 !important;
-  color: transparent;
-}
-
-.title-page {
-  text-align: center;
-  margin-top: 35%;
-}
-
-.title-page h1 {
-  font-size: 2em;
-  font-variant: normal;
-  letter-spacing: 0.02em;
-  margin: 0 0 1em;
-}
-
-.title-page .author {
-  font-style: italic;
-  font-size: 1.1em;
-  color: #5c564f;
-}
-
-.title-page .ornament {
-  margin: 2em auto;
-  letter-spacing: 0.5em;
-  color: #b08d57;
-}
-
-.nav-toc ol {
-  list-style: none;
-  padding: 0;
-}
-
-.nav-toc a {
-  text-decoration: none;
-  color: inherit;
-}
-`;
 
 function xhtmlDocument(title: string, body: string, cssHref = "styles.css"): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -158,7 +39,7 @@ function pad(n: number): string {
 
 export async function buildEpub(
   book: Book,
-  options: CompileOptions = defaultCompileOptions(book),
+  options: CompileOptions = compileOptionsForBook(book),
 ): Promise<Blob> {
   const zip = new JSZip();
   const title = book.title.trim() || "Untitled Manuscript";
@@ -180,7 +61,7 @@ export async function buildEpub(
   );
 
   const oebps = zip.folder("OEBPS")!;
-  oebps.file("styles.css", EPUB_CSS);
+  oebps.file("styles.css", epubStylesheet(options.preset));
 
   if (options.includeTitlePage) {
     oebps.file(
@@ -196,11 +77,39 @@ export async function buildEpub(
     );
   }
 
+  const fmSections = frontMatterSections(book, options);
+  const fmFiles = fmSections.map((section, index) => {
+    const href = `front-${pad(index + 1)}.xhtml`;
+    oebps.file(
+      href,
+      xhtmlDocument(
+        section.title,
+        frontMatterSectionToXhtml(section),
+      ),
+    );
+    return {
+      id: `front${pad(index + 1)}`,
+      href,
+      title: section.title,
+    };
+  });
+
   const chapterFiles = chapters.map((chapter, index) => {
     const href = `chapter-${pad(index + 1)}.xhtml`;
-    const body = chapterToXhtmlBody(chapter, {
+    const part = partDividerForChapter(chapters, index);
+    const pageBreak =
+      Boolean(chapter.compile?.pageBreakBefore) &&
+      (index > 0 || options.includeTitlePage || fmFiles.length > 0);
+    const inner = chapterToXhtmlBody(chapter, {
       sceneBreak: options.sceneBreak,
+      suppressTitle: chapter.compile?.suppressTitle,
     });
+    const body = [
+      part ? partDividerXhtml(part) : "",
+      `<section class="book-chapter${pageBreak ? " page-break-before" : ""}">${inner}</section>`,
+    ]
+      .filter(Boolean)
+      .join("\n");
     oebps.file(
       href,
       xhtmlDocument(chapter.title || `Chapter ${index + 1}`, body),
@@ -212,7 +121,7 @@ export async function buildEpub(
     };
   });
 
-  const navList = chapterFiles
+  const navList = [...fmFiles, ...chapterFiles]
     .map(
       (c) =>
         `      <li><a href="${c.href}">${escapeXml(c.title)}</a></li>`,
@@ -261,6 +170,12 @@ ${navList}
       <content src="titlepage.xhtml"/>
     </navPoint>`);
   }
+  for (const f of fmFiles) {
+    ncxPoints.push(`    <navPoint id="${f.id}" playOrder="${playOrder++}">
+      <navLabel><text>${escapeXml(f.title)}</text></navLabel>
+      <content src="${f.href}"/>
+    </navPoint>`);
+  }
   for (const c of chapterFiles) {
     ncxPoints.push(`    <navPoint id="${c.id}" playOrder="${playOrder++}">
       <navLabel><text>${escapeXml(c.title)}</text></navLabel>
@@ -291,6 +206,10 @@ ${ncxPoints.join("\n")}
           `    <item id="titlepage" href="titlepage.xhtml" media-type="application/xhtml+xml"/>`,
         ]
       : []),
+    ...fmFiles.map(
+      (f) =>
+        `    <item id="${f.id}" href="${f.href}" media-type="application/xhtml+xml"/>`,
+    ),
     `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`,
     `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`,
     `    <item id="css" href="styles.css" media-type="text/css"/>`,
@@ -304,6 +223,7 @@ ${ncxPoints.join("\n")}
     ...(options.includeTitlePage
       ? [`    <itemref idref="titlepage"/>`]
       : []),
+    ...fmFiles.map((f) => `    <itemref idref="${f.id}"/>`),
     ...chapterFiles.map((c) => `    <itemref idref="${c.id}"/>`),
   ].join("\n");
 
@@ -340,7 +260,7 @@ export async function exportEpub(
   book: Book,
   options?: CompileOptions,
 ): Promise<void> {
-  const opts = options ?? defaultCompileOptions(book);
+  const opts = options ?? compileOptionsForBook(book);
   const blob = await buildEpub(book, opts);
   downloadBlob(blob, bookFilename(book, "epub"));
 }

@@ -11,9 +11,11 @@ interface ShortcutHandlers {
   onToggleNotes?: () => void;
   onToggleInspector?: () => void;
   onToggleGoals?: () => void;
+  onToggleCritique?: () => void;
   onToggleResearch?: () => void;
   onToggleEncyclopedia?: () => void;
   onOpenExport?: () => void;
+  onOpenPreview?: () => void;
   onOpenImport?: () => void;
   onSave?: () => void;
   onChapterUp?: () => void;
@@ -117,6 +119,12 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
         return;
       }
 
+      // ⌘⇧E — book preview
+      if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        handlers.onOpenPreview?.();
+      }
+
       // ⌘/ — toggle formatting toolbar
       if (mod && e.key === "/") {
         e.preventDefault();
@@ -142,6 +150,13 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers) {
       if (mod && e.shiftKey && e.key.toLowerCase() === "g") {
         e.preventDefault();
         handlers.onToggleGoals?.();
+        return;
+      }
+
+      // ⌘⇧C — critique panel
+      if (mod && e.shiftKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        handlers.onToggleCritique?.();
       }
     };
 

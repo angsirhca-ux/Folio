@@ -63,8 +63,10 @@ type ReviewChapterSlice = {
   scenes: unknown[];
 };
 
+type ChapterReviewKind = Exclude<DevelopmentalPassKind, "continuity">;
+
 async function reviewChapterWindow(
-  kind: "style" | "story" | "action",
+  kind: ChapterReviewKind,
   book: ReviewBookSlice,
   chapter: ReviewChapterSlice,
   memory: DevelopmentalMemoryNote[],
@@ -103,7 +105,7 @@ async function reviewChapterWindow(
 }
 
 async function reviewChapter(
-  kind: "style" | "story" | "action",
+  kind: ChapterReviewKind,
   book: ReviewBookSlice,
   chapter: ReviewChapterSlice,
   memory: DevelopmentalMemoryNote[],
@@ -590,8 +592,9 @@ export function DevelopmentalPanel({
                   >
                     <p className="mt-3 font-[family-name:var(--font-ui)] text-xs leading-relaxed text-[var(--ink-muted)]">
                       Suggestions stay here — pin a try-next into private notes,
-                      ✓/✕ teaches the next pass. Collapse this bar to read the
-                      full list.
+                      ✓/✕ teaches the next run. Four jobs, not a checklist:
+                      line (including tense and POV), story, action, then
+                      book-wide continuity.
                     </p>
 
                     <div className="mt-3 grid gap-2">

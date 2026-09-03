@@ -3,7 +3,6 @@ import type Anthropic from "@anthropic-ai/sdk";
 import {
   REVIEW_TOOL_NAME,
   REVIEW_MAX_TOKENS,
-  MAX_FLAGS_PER_PASS,
   buildReviewContext,
   chapterPassLabel,
   chapterToPlainText,
@@ -148,7 +147,7 @@ export async function POST(request: Request) {
   }
 
   const kindRaw = String(body.kind);
-  if (kindRaw === "line") {
+  if (kindRaw === "line" || kindRaw === "tense" || kindRaw === "pov") {
     body.kind = "style";
   } else if (
     kindRaw !== "style" &&
@@ -211,7 +210,7 @@ export async function POST(request: Request) {
     for (const window of windows) {
       const windowParts = [
         multi || windowTotal > 1
-          ? `WINDOW ${window.index + 1} of ${windowTotal} — covering: ${window.label}. Flag ONLY issues whose excerpts appear in this window’s text. Soft max ~${Math.max(8, Math.ceil(MAX_FLAGS_PER_PASS / Math.max(1, windowTotal)))} flags for this window.`
+          ? `WINDOW ${window.index + 1} of ${windowTotal} — covering: ${window.label}. Flag ONLY issues whose excerpts appear in this window’s text. Flag every distinct issue in this window — this is not a fraction of a chapter quota.`
           : "",
         `NARRATIVE PERSON (whole chapter): ${narrativePersonLabel(narrativePerson)}. EXAMPLE suggestions must stay in this person — do not switch to third person if the chapter is first, or vice versa.`,
         window.index > 0
@@ -240,9 +239,10 @@ export async function POST(request: Request) {
 
 Remember:
 - Fill the flags array FIRST (verbatim excerpts the author can find on the page), then a 1–2 sentence summary last.
-- Flag real issues — don’t drop problems to keep the list short. Soft max around ${MAX_FLAGS_PER_PASS} flags across the whole chapter; collapse identical repeats into representative moments.
+- Flag real issues — don’t drop problems to keep the list short. Collapse identical repeats into representative moments; keep different moments as separate flags. There is no maximum count.
 - Never put flaggable moments only in the summary. Empty flags + a long overview is invalid.
 - For Action: every kinetic opportunity (summarized beat, static block, talking-heads stretch, blurred fumble, labeled emotion wanting a gesture) must be its own flag.
+- For Style & Line: name governing tense and POV in the summary; flag line nits, tense slips, and viewpoint hops as discrete excerpts.
 - Suggestions stay in this review only — never rewrite or insert into the manuscript.
 
 ${suggestionQualityRules(narrativePerson)}

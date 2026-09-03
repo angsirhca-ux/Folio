@@ -3,6 +3,7 @@ import {
   SOUNDTRACK_COMPOSE_TOOL_NAME,
   buildSoundtrackComposeContext,
   composeSoundtrackTool,
+  soundtrackComposeSystemPrompt,
   type SoundtrackComposePayload,
 } from "@/lib/soundtrackCompose";
 import {
@@ -17,7 +18,10 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 type ComposeBody = {
-  book: Pick<Book, "title" | "author" | "chapters" | "soundtrack">;
+  book: Pick<
+    Book,
+    "title" | "author" | "chapters" | "soundtrack" | "soundtrackTaste"
+  >;
   manuscriptIndex: ManuscriptIndexData;
 };
 
@@ -80,6 +84,7 @@ export async function POST(request: Request) {
       author: body.book.author,
       chapters: body.book.chapters ?? [],
       soundtrack: body.book.soundtrack ?? [],
+      soundtrackTaste: body.book.soundtrackTaste ?? [],
     },
     index,
   );
@@ -94,20 +99,21 @@ export async function POST(request: Request) {
   try {
     const message = await client.messages.create({
       model: anthropicModel(),
-      max_tokens: 4096,
+      max_tokens: 6144,
       tools: [composeSoundtrackTool],
       tool_choice: {
         type: "tool",
         name: SOUNDTRACK_COMPOSE_TOOL_NAME,
       },
-      system: `You are a novelist’s music supervisor — playful but tasteful.
-Given a structured manuscript READING (not raw skim), propose exactly 15 songs that feel like a soundtrack for this book.
-Match tone, characters, and arc. Prefer real songs. Vary energy across the 15. Never rewrite manuscript prose.
-Each track needs title, artist, a short why-it-fits note, and a placement label.`,
+      system: soundtrackComposeSystemPrompt,
       messages: [
         {
           role: "user",
-          content: `Compose the soundtrack for “${body.book.title || "Untitled"}”.\n\n${context}`,
+          content: `Compose the score for “${body.book.title || "Untitled"}”.
+
+Fill every slot. Specific songs. Specific why-notes. One-line arcBlurb.
+
+${context}`,
         },
       ],
     });
@@ -122,6 +128,7 @@ Each track needs title, artist, a short why-it-fits note, and a placement label.
         artist: s.artist?.trim() ?? "",
         note: s.note?.trim() ?? "",
         placement: s.placement?.trim() ?? "",
+        slot: s.slot?.trim() ?? "",
         order: s.order,
       }))
       .filter((s) => s.title && s.artist)
@@ -134,7 +141,10 @@ Each track needs title, artist, a short why-it-fits note, and a placement label.
       );
     }
 
-    return NextResponse.json({ songs } satisfies SoundtrackComposePayload);
+    return NextResponse.json({
+      arcBlurb: (raw?.arcBlurb ?? "").trim().slice(0, 280),
+      songs,
+    } satisfies SoundtrackComposePayload);
   } catch (err) {
     const detail =
       err instanceof Error ? err.message : "Unknown Anthropic error";

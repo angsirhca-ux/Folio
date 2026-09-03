@@ -16,7 +16,7 @@ interface BookPageProps {
   activeReviewFlagId?: string | null;
   /** When false, hide developmental flag decorations on the page. */
   showReviewHighlights?: boolean;
-  /** Only highlight flags from this pass tab (style / story / line / continuity). */
+  /** Only highlight flags from this pass tab. */
   reviewPassKind?: DevelopmentalPassKind | null;
   onMentionActivate?: (hit: MentionActivate) => void;
 }

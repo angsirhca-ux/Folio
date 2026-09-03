@@ -2,10 +2,12 @@ import type { Book, Chapter } from "@/lib/types";
 import {
   applySceneBreakStyle,
   chaptersForCompile,
-  defaultCompileOptions,
+  compileOptionsForBook,
+  frontMatterSections,
   type CompileOptions,
 } from "./compile";
 import {
+  blockPlainText,
   bookFilename,
   downloadBlob,
   parseChapterBlocks,
@@ -14,8 +16,8 @@ import {
 
 function blockToPlain(block: ManuscriptBlock): string {
   if (block.type === "scene-break") return block.text ? `\n${block.text}\n` : "\n";
-  if (block.type === "heading") return block.text.toUpperCase();
-  return block.text;
+  if (block.type === "heading") return blockPlainText(block).toUpperCase();
+  return blockPlainText(block);
 }
 
 function chapterToPlain(chapter: Chapter, options: CompileOptions): string {
@@ -59,7 +61,7 @@ function chapterToPlain(chapter: Chapter, options: CompileOptions): string {
 
 export function buildTxt(
   book: Book,
-  options: CompileOptions = defaultCompileOptions(book),
+  options: CompileOptions = compileOptionsForBook(book),
 ): string {
   const title = book.title.trim() || "Untitled Manuscript";
   const author = book.author.trim();
@@ -71,6 +73,16 @@ export function buildTxt(
     if (author) parts.push(`by ${author}`);
     parts.push("");
     parts.push("—".repeat(Math.min(40, title.length + 8)));
+    parts.push("");
+  }
+
+  for (const section of frontMatterSections(book, options)) {
+    parts.push(section.title.toUpperCase());
+    parts.push("");
+    parts.push(...section.paragraphs);
+    if (section.attribution) parts.push(section.attribution);
+    parts.push("");
+    parts.push("—".repeat(24));
     parts.push("");
   }
 
@@ -97,7 +109,7 @@ export async function exportTxt(
   book: Book,
   options?: CompileOptions,
 ): Promise<void> {
-  const opts = options ?? defaultCompileOptions(book);
+  const opts = options ?? compileOptionsForBook(book);
   const text = buildTxt(book, opts);
   const blob = new Blob(["\uFEFF" + text], {
     type: "text/plain;charset=utf-8",

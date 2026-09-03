@@ -382,8 +382,22 @@ export interface Chapter {
   content: string;
   notes: string;
   scenes: Scene[];
+  /** Per-chapter compile overrides for export and preview. */
+  compile?: ChapterCompileSettings;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Export / preview formatting for one chapter. */
+export interface ChapterCompileSettings {
+  /** Leave out of compile, preview, and word count for export selection. */
+  omitFromExport?: boolean;
+  /** Do not inject or emphasize the chapter title heading. */
+  suppressTitle?: boolean;
+  /** Force a page break before this chapter (export + preview). */
+  pageBreakBefore?: boolean;
+  /** Optional part divider — e.g. "Part II". Shown when it changes from prior chapter. */
+  partLabel?: string;
 }
 
 export type TrashKind =
@@ -561,6 +575,12 @@ export interface Book {
   chronicle: ChronicleEvent[];
   /** Listening playlist for the novel — Claude or author curated. */
   soundtrack: SoundtrackSong[];
+  /** One-line listening journey for the soundtrack (from Clarence). */
+  soundtrackArc: string;
+  /**
+   * Author taste seeds (up to 4 artists). Clarence leans on these when composing.
+   */
+  soundtrackTaste: string[];
   /**
    * All story maps for this book (London streets, fantasy continent, …).
    * One is active at a time via `activeMapId`.
@@ -615,9 +635,32 @@ export interface Book {
   seriesId?: string | null;
   /** Daily / manuscript goals and day log. */
   goals: BookGoals;
+  /** Dedication, copyright, epigraph — rendered when compile toggles are on. */
+  frontMatter?: BookFrontMatter;
+  /** Last-used compile & export options for this book. */
+  compileSettings?: BookCompileSettings;
   activeChapterId: string;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Structured front matter — content lives here; include flags live in compile settings. */
+export interface BookFrontMatter {
+  dedication?: string;
+  copyright?: string;
+  epigraph?: string;
+  epigraphAttribution?: string;
+}
+
+/** Persisted subset of compile options (chapter selection refreshed at export time). */
+export interface BookCompileSettings {
+  preset?: "reading" | "submission";
+  includeTitlePage?: boolean;
+  includeToc?: boolean;
+  sceneBreak?: "asterisks" | "blank" | "hash" | "none";
+  includeDedication?: boolean;
+  includeCopyright?: boolean;
+  includeEpigraph?: boolean;
 }
 
 /** Corkboard geography for the book — presentation layer over Locations. */
@@ -736,6 +779,14 @@ export type DevelopmentalFlagCategory =
   | "redundancy"
   | "word-choice"
   | "dialogue-polish"
+  | "wrong-tense"
+  | "tense-shift"
+  | "flashback-tense"
+  | "sequence-of-tenses"
+  | "head-hop"
+  | "knowledge-slip"
+  | "outside-access"
+  | "person-shift"
   | "telling"
   | "pacing"
   | "plot-holes"
@@ -838,12 +889,23 @@ export const BETA_EMOTION_META: Record<BetaEmotion, { label: string }> = {
 };
 
 export type BetaCraftQuestionId =
+  | "follow-up"
+  | "keep-reading"
+  | "skimmed"
+  | "believed"
+  | "loved"
+  | "disliked"
+  | "carrying"
+  | "opening-hold"
+  | "middle-drag"
+  | "ending-land"
+  /** @deprecated Stored on older reviews — mapped on load. */
   | "goals-clear"
   | "voices-distinct"
   | "weakest-character"
-  | "high-points-earned"
-  | "loved"
-  | "disliked";
+  | "high-points-earned";
+
+export type BetaWouldContinue = "yes" | "maybe" | "no";
 
 export interface BetaReaderPersona {
   id: string;
@@ -879,6 +941,10 @@ export interface BetaReview {
    * or an explicit "like it as-is / change nothing."
    */
   readerWish: string;
+  /** Would this reader turn the page tonight? */
+  wouldContinue?: BetaWouldContinue;
+  /** True when this chapter was the last in the manuscript at read time. */
+  terminalChapter?: boolean;
 }
 
 /** Cross-chapter impressions this persona carries forward. */
@@ -1099,7 +1165,7 @@ export const DEVELOPMENTAL_PASS_META: Record<
   style: {
     label: "Style & Line",
     blurb:
-      "Mechanics and prose — filters, verbs, repetition, tags, adverbs, rhythm, diction, dialogue polish.",
+      "One line pass — filters, diction, tense slips, and POV hops. Flags only.",
   },
   story: {
     label: "Story & Structure",
@@ -1131,6 +1197,14 @@ export const DEVELOPMENTAL_CATEGORY_META: Record<
   redundancy: { label: "Redundancy", pass: "style" },
   "word-choice": { label: "Word choice", pass: "style" },
   "dialogue-polish": { label: "Dialogue", pass: "style" },
+  "wrong-tense": { label: "Wrong tense", pass: "style" },
+  "tense-shift": { label: "Tense shift", pass: "style" },
+  "flashback-tense": { label: "Flashback tense", pass: "style" },
+  "sequence-of-tenses": { label: "Sequence of tenses", pass: "style" },
+  "head-hop": { label: "Head hop", pass: "style" },
+  "knowledge-slip": { label: "Knowledge slip", pass: "style" },
+  "outside-access": { label: "Outside access", pass: "style" },
+  "person-shift": { label: "Person shift", pass: "style" },
   telling: { label: "Telling vs showing", pass: "story" },
   pacing: { label: "Pacing", pass: "story" },
   "plot-holes": { label: "Plot holes", pass: "story" },

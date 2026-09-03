@@ -94,7 +94,7 @@ export function normalizeContinuityPayload(
   }>(payload?.flags)
     .filter((f) => f && allowed.has(f.category))
     .filter((f) => f.excerpt?.trim() && f.note?.trim())
-    .slice(0, 60)
+    .slice(0, 400)
     .map((f) => {
       const chapterId = resolveChapterId(f.chapterId, f.chapterTitle, book);
       const sceneIndex =
@@ -325,6 +325,7 @@ HARD RULES:
 - Prefer concrete contradictions over vague vibes.
 - Respect AUTHOR PREFERENCES for tone of feedback; never skip a real continuity contradiction because the author disliked a similar note.
 - If the book is thin, return few or no flags rather than inventing problems.
+- Flag every genuine continuity contradiction you can locate — do not stop at a round number.
 - memoryUpdates: only durable continuity facts worth remembering later.
 
 CONTINUITY CATEGORIES — use only these:
@@ -352,6 +353,8 @@ export const continuityTool: Anthropic.Tool = {
       },
       flags: {
         type: "array",
+        description:
+          "Every distinct continuity contradiction with a verbatim excerpt. Fill this fully — do not cap the list.",
         items: {
           type: "object",
           properties: {

@@ -12,21 +12,100 @@ import type { Book, Chapter } from "@/lib/types";
 import {
   applySceneBreakStyle,
   chaptersForCompile,
-  defaultCompileOptions,
+  compileOptionsForBook,
+  frontMatterSections,
+  partDividerForChapter,
   type CompileOptions,
+  type FrontMatterSection,
 } from "./compile";
 import {
+  blockPlainText,
   bookFilename,
   downloadBlob,
   parseChapterBlocks,
   type ManuscriptBlock,
+  type ManuscriptInlineRun,
 } from "./manuscript";
 
-const INK = "2D2A26";
-const MUTED = "6B645C";
-const ACCENT = "B08D57";
+import { typographyForPreset } from "@/lib/format/tokens";
+
+function runsToTextRuns(
+  runs: ManuscriptInlineRun[] | undefined,
+  fallbackText: string,
+  style: {
+    font: string;
+    size: number;
+    color: string;
+    italics?: boolean;
+  },
+): TextRun[] {
+  const source = runs?.length ? runs : [{ text: fallbackText }];
+  return source.map(
+    (run) =>
+      new TextRun({
+        text: run.text,
+        font: style.font,
+        size: style.size,
+        color: style.color,
+        bold: run.bold,
+        italics: run.italic ?? style.italics,
+      }),
+  );
+}
+
+function frontMatterParagraphs(
+  sections: FrontMatterSection[],
+  options: CompileOptions,
+): Paragraph[] {
+  const submission = options.preset === "submission";
+  const font = typographyForPreset(options.preset).bodyFontDocx;
+  const size = submission ? 24 : 22;
+  const line = submission ? 480 : 360;
+  const paras: Paragraph[] = [];
+
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i]!;
+    if (i > 0) {
+      paras.push(new Paragraph({ children: [new PageBreak()] }));
+    }
+    for (const paragraph of section.paragraphs) {
+      paras.push(
+        new Paragraph({
+          alignment:
+            section.variant === "copyright"
+              ? AlignmentType.LEFT
+              : AlignmentType.CENTER,
+          spacing: { after: 160, line },
+          children: runsToTextRuns(undefined, paragraph, {
+            font,
+            size: section.variant === "copyright" ? 20 : size,
+            color: "2D2A26",
+            italics: section.id === "epigraph",
+          }),
+        }),
+      );
+    }
+    if (section.attribution) {
+      paras.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 120, after: 240, line },
+          children: runsToTextRuns(undefined, section.attribution, {
+            font,
+            size: 20,
+            color: "6B645C",
+            italics: true,
+          }),
+        }),
+      );
+    }
+  }
+
+  return paras;
+}
 
 function titlePageReading(title: string, author: string): Paragraph[] {
+  const t = typographyForPreset("reading");
   const paras: Paragraph[] = [
     new Paragraph({ children: [] }),
     new Paragraph({ children: [] }),
@@ -38,10 +117,10 @@ function titlePageReading(title: string, author: string): Paragraph[] {
       children: [
         new TextRun({
           text: title,
-          font: "Georgia",
+          font: t.bodyFontDocx,
           size: 48,
           bold: true,
-          color: INK,
+          color: t.ink.replace("#", "").toUpperCase(),
         }),
       ],
     }),
@@ -51,9 +130,9 @@ function titlePageReading(title: string, author: string): Paragraph[] {
       children: [
         new TextRun({
           text: "*  *  *",
-          font: "Georgia",
+          font: t.bodyFontDocx,
           size: 22,
-          color: ACCENT,
+          color: t.accent.replace("#", "").toUpperCase(),
         }),
       ],
     }),
@@ -67,10 +146,10 @@ function titlePageReading(title: string, author: string): Paragraph[] {
         children: [
           new TextRun({
             text: author,
-            font: "Georgia",
+            font: t.bodyFontDocx,
             size: 26,
             italics: true,
-            color: MUTED,
+            color: t.muted.replace("#", "").toUpperCase(),
           }),
         ],
       }),
@@ -130,20 +209,44 @@ function headingLevel(level: 1 | 2 | 3) {
   return HeadingLevel.HEADING_3;
 }
 
+function partDividerParagraphs(label: string, options: CompileOptions): Paragraph[] {
+  const t = typographyForPreset(options.preset);
+  const ink = t.ink.replace("#", "").toUpperCase();
+  return [
+    new Paragraph({ children: [new PageBreak()] }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 480, after: 360 },
+      children: [
+        new TextRun({
+          text: label,
+          font: t.bodyFontDocx,
+          size: t.heading1SizeDocx,
+          color: ink,
+        }),
+      ],
+    }),
+  ];
+}
+
 function blocksToParagraphs(
   blocks: ManuscriptBlock[],
   chapterTitle: string,
   options: CompileOptions,
+  suppressTitle?: boolean,
 ): Paragraph[] {
   const submission = options.preset === "submission";
-  const font = submission ? "Times New Roman" : "Georgia";
-  const bodySize = submission ? 24 : 22; // 12pt vs 11pt
-  const line = submission ? 480 : 360; // double vs ~1.5
+  const t = typographyForPreset(options.preset);
+  const font = t.bodyFontDocx;
+  const ink = t.ink.replace("#", "").toUpperCase();
+  const muted = t.muted.replace("#", "").toUpperCase();
+  const bodySize = t.bodySizeDocx;
+  const line = submission ? 480 : 360;
   const paras: Paragraph[] = [];
   const hasH1 = blocks.some((b) => b.type === "heading" && b.level === 1);
   let previous: ManuscriptBlock["type"] | null = null;
 
-  if (!hasH1) {
+  if (!hasH1 && !suppressTitle) {
     paras.push(
       new Paragraph({
         heading: HeadingLevel.HEADING_1,
@@ -153,9 +256,9 @@ function blocksToParagraphs(
           new TextRun({
             text: chapterTitle,
             font,
-            size: submission ? 24 : 32,
+            size: submission ? 24 : t.heading1SizeDocx,
             bold: !submission,
-            color: INK,
+            color: ink,
           }),
         ],
       }),
@@ -166,7 +269,7 @@ function blocksToParagraphs(
   for (const block of blocks) {
     if (block.type === "heading") {
       const level = block.level ?? 1;
-      const size = submission ? 24 : level === 1 ? 32 : level === 2 ? 26 : 24;
+      const size = submission ? 24 : level === 1 ? t.heading1SizeDocx : level === 2 ? 26 : 24;
       paras.push(
         new Paragraph({
           heading: headingLevel(level),
@@ -176,15 +279,21 @@ function blocksToParagraphs(
             after: level === 1 ? 360 : 200,
             line,
           },
-          children: [
-            new TextRun({
-              text: block.text,
-              font,
-              size,
-              bold: !submission && level === 1,
-              color: INK,
-            }),
-          ],
+          children: block.runs?.some((r) => r.bold || r.italic)
+            ? runsToTextRuns(block.runs, blockPlainText(block), {
+                font,
+                size,
+                color: ink,
+              })
+            : [
+                new TextRun({
+                  text: blockPlainText(block),
+                  font,
+                  size,
+                  bold: !submission && level === 1,
+                  color: ink,
+                }),
+              ],
         }),
       );
     } else if (block.type === "scene-break") {
@@ -202,7 +311,7 @@ function blocksToParagraphs(
                   text,
                   font,
                   size: bodySize,
-                  color: submission ? INK : MUTED,
+                  color: submission ? ink : muted,
                 }),
               ]
             : [],
@@ -213,15 +322,12 @@ function blocksToParagraphs(
         new Paragraph({
           spacing: { before: 160, after: 160, line },
           indent: { left: convertInchesToTwip(0.4) },
-          children: [
-            new TextRun({
-              text: block.text,
-              font,
-              size: submission ? 24 : 21,
-              italics: true,
-              color: submission ? INK : MUTED,
-            }),
-          ],
+          children: runsToTextRuns(block.runs, blockPlainText(block), {
+            font,
+            size: submission ? 24 : 21,
+            color: submission ? ink : muted,
+            italics: true,
+          }),
         }),
       );
     } else {
@@ -234,14 +340,11 @@ function blocksToParagraphs(
           indent: indentFirst
             ? { firstLine: convertInchesToTwip(0.5) }
             : undefined,
-          children: [
-            new TextRun({
-              text: block.text,
-              font,
-              size: bodySize,
-              color: INK,
-            }),
-          ],
+          children: runsToTextRuns(block.runs, blockPlainText(block), {
+            font,
+            size: bodySize,
+            color: ink,
+          }),
         }),
       );
     }
@@ -255,6 +358,8 @@ function chapterParagraphs(
   chapter: Chapter,
   isFirst: boolean,
   options: CompileOptions,
+  chapters: Chapter[],
+  index: number,
 ): Paragraph[] {
   const blocks = applySceneBreakStyle(
     parseChapterBlocks(chapter.content),
@@ -264,26 +369,35 @@ function chapterParagraphs(
     blocks,
     chapter.title || "Chapter",
     options,
+    chapter.compile?.suppressTitle,
   );
 
-  if (isFirst) return body;
+  const prefix: Paragraph[] = [];
+  const part = partDividerForChapter(chapters, index);
+  if (part) {
+    prefix.push(...partDividerParagraphs(part, options));
+  } else if (!isFirst || chapter.compile?.pageBreakBefore) {
+    prefix.push(
+      new Paragraph({
+        children: [new PageBreak()],
+      }),
+    );
+  }
 
-  return [
-    new Paragraph({
-      children: [new PageBreak()],
-    }),
-    ...body,
-  ];
+  if (prefix.length === 0) return body;
+  return [...prefix, ...body];
 }
 
 export async function buildDocx(
   book: Book,
-  options: CompileOptions = defaultCompileOptions(book),
+  options: CompileOptions = compileOptionsForBook(book),
 ): Promise<Blob> {
   const title = book.title.trim() || "Untitled Manuscript";
   const author = book.author.trim();
   const chapters = chaptersForCompile(book, options);
   const submission = options.preset === "submission";
+  const t = typographyForPreset(options.preset);
+  const ink = t.ink.replace("#", "").toUpperCase();
 
   const children: Paragraph[] = [];
 
@@ -300,8 +414,21 @@ export async function buildDocx(
     );
   }
 
+  const fm = frontMatterSections(book, options);
+  if (fm.length) {
+    children.push(...frontMatterParagraphs(fm, options));
+  }
+
   chapters.forEach((chapter, index) => {
-    children.push(...chapterParagraphs(chapter, index === 0, options));
+    children.push(
+      ...chapterParagraphs(
+        chapter,
+        index === 0 && !fm.length,
+        options,
+        chapters,
+        index,
+      ),
+    );
   });
 
   const doc = new Document({
@@ -312,9 +439,9 @@ export async function buildDocx(
       default: {
         document: {
           run: {
-            font: submission ? "Times New Roman" : "Georgia",
-            size: submission ? 24 : 22,
-            color: INK,
+            font: t.bodyFontDocx,
+            size: t.bodySizeDocx,
+            color: ink,
           },
           paragraph: {
             spacing: { line: submission ? 480 : 360 },
@@ -355,7 +482,7 @@ export async function exportDocx(
   book: Book,
   options?: CompileOptions,
 ): Promise<void> {
-  const opts = options ?? defaultCompileOptions(book);
+  const opts = options ?? compileOptionsForBook(book);
   const blob = await buildDocx(book, opts);
   downloadBlob(blob, bookFilename(book, "docx"));
 }

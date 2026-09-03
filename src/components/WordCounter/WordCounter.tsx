@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { motion } from "framer-motion";
 import { countWords, formatWordCount } from "@/lib/utils";
 import { wordsWrittenToday } from "@/lib/goals";
@@ -14,6 +15,20 @@ export function WordCounter({
   const { wordCount, isSaving, isDirty, activeChapter, book, sessionWords } =
     useBook();
   const chapterWords = countWords(activeChapter.content);
+  const activeIndex = book.chapters.findIndex((c) => c.id === activeChapter.id);
+  const chapterNumber = activeIndex >= 0 ? activeIndex + 1 : 1;
+  const wordsUntilNow = useMemo(() => {
+    if (activeIndex < 0) return chapterWords;
+    let sum = 0;
+    for (let i = 0; i <= activeIndex; i++) {
+      const ch = book.chapters[i];
+      sum +=
+        ch.id === activeChapter.id
+          ? chapterWords
+          : countWords(ch.content ?? "");
+    }
+    return sum;
+  }, [activeChapter.id, activeIndex, book.chapters, chapterWords]);
   const status = isSaving ? "Saving…" : isDirty ? "Unsaved" : "Saved";
   const goals = book.goals;
   const today = wordsWrittenToday(goals, wordCount);
@@ -74,17 +89,33 @@ export function WordCounter({
           Goals
         </button>
       )}
-      <div className="pointer-events-none flex items-baseline gap-3">
+      <div
+        className="pointer-events-none flex flex-col items-end gap-0.5"
+        title={`Through chapter ${chapterNumber}: ${formatWordCount(wordsUntilNow)} · This chapter: ${formatWordCount(chapterWords)} · Full manuscript: ${formatWordCount(wordCount)}`}
+      >
         <span className="tabular-nums">
-          {formatWordCount(chapterWords)}, {formatWordCount(wordCount)}
+          {formatWordCount(wordsUntilNow)}
+          <span className="opacity-30"> · </span>
+          {formatWordCount(chapterWords)}
+          <span className="opacity-30"> · </span>
+          {formatWordCount(wordCount)}
         </span>
-        <span className="opacity-30">·</span>
-        <span
-          className={
-            isDirty || isSaving ? "text-[var(--accent)] opacity-90" : "opacity-70"
-          }
-        >
-          {status}
+        <span className="flex items-baseline gap-3 text-[0.58rem] uppercase tracking-[0.14em] opacity-55">
+          <span>Through ch. {chapterNumber}</span>
+          <span className="opacity-30">·</span>
+          <span>Chapter</span>
+          <span className="opacity-30">·</span>
+          <span>Book</span>
+          <span className="opacity-30">·</span>
+          <span
+            className={
+              isDirty || isSaving
+                ? "text-[var(--accent)] opacity-90"
+                : "normal-case tracking-wide opacity-80"
+            }
+          >
+            {status}
+          </span>
         </span>
       </div>
     </motion.div>

@@ -101,6 +101,10 @@ export function EditorContextMenu({
       ref={panelRef}
       role="menu"
       aria-labelledby={labelId}
+      onMouseDown={(e) => {
+        // Keep ProseMirror focused so blur doesn't race the replace click.
+        e.preventDefault();
+      }}
       className="folio-chrome fixed z-[90] overflow-hidden rounded-2xl border border-[rgba(45,42,38,0.08)] bg-[rgba(247,243,234,0.96)] shadow-[0_16px_40px_rgba(45,42,38,0.12)] backdrop-blur-xl"
       style={{ left, top, width: `${width}rem` }}
     >
@@ -127,7 +131,6 @@ export function EditorContextMenu({
                 key={s}
                 onClick={() => {
                   onReplaceSpelling(s);
-                  onClose();
                 }}
               >
                 {s}
@@ -176,10 +179,9 @@ export function EditorContextMenu({
                   {synonyms.map((hit) => (
                     <MenuButton
                       key={`syn-${hit.word}`}
-                      onClick={() => {
-                        onPickSynonym(hit.word);
-                        onClose();
-                      }}
+                        onClick={() => {
+                          onPickSynonym(hit.word);
+                        }}
                     >
                       {hit.word}
                     </MenuButton>
@@ -193,10 +195,9 @@ export function EditorContextMenu({
                         <MenuButton
                           key={`rel-${hit.word}`}
                           muted
-                          onClick={() => {
-                            onPickSynonym(hit.word);
-                            onClose();
-                          }}
+                        onClick={() => {
+                          onPickSynonym(hit.word);
+                        }}
                         >
                           {hit.word}
                         </MenuButton>
@@ -285,19 +286,25 @@ function MenuButton({
   muted?: boolean;
   disabled?: boolean;
 }) {
+  const firedRef = useRef(false);
   return (
     <button
       type="button"
       role="menuitem"
       disabled={disabled}
       onPointerDown={(e) => {
-        // Keep the manuscript selection / TipTap range until we replace.
         if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
+        firedRef.current = true;
+        onClick();
+        window.setTimeout(() => {
+          firedRef.current = false;
+        }, 0);
       }}
       onClick={(e) => {
-        if (disabled) return;
+        // Backup if pointerdown was swallowed (some Electron builds).
+        if (disabled || firedRef.current) return;
         e.preventDefault();
         e.stopPropagation();
         onClick();

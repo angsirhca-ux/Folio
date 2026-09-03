@@ -138,12 +138,12 @@ const TOOLBAR_ICONS: Array<{ icon: LucideIcon; label: string; blurb: string }> =
     {
       icon: Users,
       label: "Beta readers",
-      blurb: "Persona reactions across chapters.",
+      blurb: "Chapter reads or a full-book pass — keep going, or put it down.",
     },
     {
       icon: ClipboardCheck,
       label: "Critique",
-      blurb: "Genre checklists and pressure passes.",
+      blurb: "Section checklists and pressure passes.",
     },
     {
       icon: Target,
@@ -158,12 +158,14 @@ const SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: "⌘ S", action: "Save now" },
   { keys: "⌘ O", action: "Upload / import" },
   { keys: "⌘ E", action: "Compile & export" },
+  { keys: "⌘ ⇧ E", action: "Book preview" },
   { keys: "⌘ ,", action: "Settings" },
   { keys: "⌘ /", action: "Formatting toolbar" },
   { keys: "⌘ ⇧ T", action: "Thesaurus (synonyms for word)" },
   { keys: "⌘ ⇧ N", action: "Chapter notes" },
   { keys: "⌘ ⇧ M", action: "Scene details" },
   { keys: "⌘ ⇧ G", action: "Writing goals" },
+  { keys: "⌘ ⇧ C", action: "Critique panel" },
   { keys: "⌘ ⌥ F", action: "Focus mode" },
   { keys: "⌘ ⌥ R", action: "Research rail" },
   { keys: "⌘ ⌥ E", action: "Encyclopedia rail" },
@@ -306,22 +308,25 @@ export function FolioHowToDialog({
             <div className="space-y-3 font-[family-name:var(--font-ui)] text-sm leading-relaxed text-[var(--ink-muted)]">
               <p>
                 <span className="text-[var(--ink)]">Developmental</span> (cat
-                icon on the manuscript toolbar) — craft flags for style, story,
-                action, and continuity. Suggestions stay in the panel; your
+                icon on the manuscript toolbar) — four craft runs: style & line
+                (prose, tense, POV), story, action, and book-wide continuity.
+                Suggestions stay in the panel; your
                 sentences stay yours.
               </p>
               <p>
                 <span className="text-[var(--ink)]">Beta readers</span> —
-                persona passes that remember earlier chapters. They react
-                beat-by-beat, answer craft questions, and close with what they’d
-                emotionally want instead (or like it as-is). They don’t rewrite.
+                three named readers continuing the novel. They notice whether a
+                chapter follows, where they’d skim, and whether they’d keep
+                going tonight — or, on the <em>Full book</em> tab, whether the
+                opening holds, the middle drags, and the ending lands. They
+                remember earlier chapters. They don’t rewrite.
               </p>
               <p>
-                <span className="text-[var(--ink)]">Critique</span> — genre
-                checklists. <em>Smart pack</em> covers scene craft, fantasy,
-                romance, and arc (skips what doesn’t apply). <em>Pressure</em>{" "}
-                is a short heat-check on stakes, agency, causality, and chapter
-                pull. Verdicts and notes only — still no prose rewrites.
+                <span className="text-[var(--ink)]">Critique</span> — craft
+                checklists you can run by section (scene, fantasy, romance, arc)
+                or as a quick <em>Pressure</em> pass on stakes and momentum —
+                on this chapter or the full manuscript. Verdicts and notes only
+                — never rewrites prose.
               </p>
             </div>
           </Section>

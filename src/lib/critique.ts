@@ -24,13 +24,72 @@ import {
   chapterToPlainText,
   truncateChapterPlain,
 } from "./developmentalEditor";
+import {
+  chapterEndingPlain,
+  MANUSCRIPT_BETA_CHAPTER_ID,
+  MANUSCRIPT_BETA_TITLE,
+  partitionManuscriptBetaWindows,
+  type ManuscriptBetaWindow,
+} from "./betaReaders";
 import { continuityNotesForPrompt } from "./continuity";
 import { createId } from "./utils";
 
 export const CRITIQUE_TOOL = "save_critique";
+export const MANUSCRIPT_CRITIQUE_CHAPTER_ID = MANUSCRIPT_BETA_CHAPTER_ID;
+export const MANUSCRIPT_CRITIQUE_TITLE = MANUSCRIPT_BETA_TITLE;
+export const MANUSCRIPT_CRITIQUE_WINDOW_CHARS = 12_000;
 export const MAX_CRITIQUE_MEMORY = 48;
 export const MAX_CRITIQUE_REVIEWS = 40;
 export const CRITIQUE_MAX_TOKENS = 8192;
+
+export const SMART_CRITIQUE_SECTIONS: CritiqueSectionId[] = [
+  "scene",
+  "fantasy",
+  "romance",
+  "arc",
+];
+
+export type CritiqueVerdictSummary = {
+  yes: number;
+  partial: number;
+  no: number;
+  na: number;
+  open: number;
+};
+
+export function critiqueVerdictSummary(
+  items: CritiqueItemResult[],
+): CritiqueVerdictSummary {
+  const summary: CritiqueVerdictSummary = {
+    yes: 0,
+    partial: 0,
+    no: 0,
+    na: 0,
+    open: 0,
+  };
+  for (const item of items) {
+    if (item.verdict === "n/a") {
+      summary.na += 1;
+    } else {
+      summary[item.verdict] += 1;
+    }
+    if (item.verdict === "no" || item.verdict === "partial") {
+      summary.open += 1;
+    }
+  }
+  return summary;
+}
+
+export function questionsForCritiqueRun(
+  pack: CritiquePack,
+  sections?: CritiqueSectionId[],
+): CritiquePackQuestion[] {
+  if (!sections?.length || pack.id !== "smart") {
+    return pack.questions;
+  }
+  const allowed = new Set(sections);
+  return pack.questions.filter((q) => allowed.has(q.sectionId));
+}
 
 export const CRITIQUE_SECTION_META: Record<
   CritiqueSectionId,
@@ -274,7 +333,7 @@ export const SMART_CRITIQUE_PACK: CritiquePack = {
   id: "smart",
   name: "Smart pack",
   blurb:
-    "Broad craft checklist: scene mechanics, fantasy worldbuilding, romance beats, and character arc. Answers n/a when a section doesn’t apply.",
+    "Craft checklists you can run by section — scene, fantasy, romance, or character arc — or all at once. Skips what doesn’t apply.",
   questions: [
     ...SCENE_QUESTIONS,
     ...FANTASY_QUESTIONS,
@@ -522,14 +581,21 @@ export function normalizeCritiquePayload(
   args: {
     pack: CritiquePack;
     chapter: Pick<Chapter, "id" | "title">;
+    questions?: CritiquePackQuestion[];
+    manuscript?: boolean;
   },
 ): { review: CritiqueReview; memoryUpdates: CritiqueMemoryNote[] } {
+  const manuscript =
+    args.manuscript ?? args.chapter.id === MANUSCRIPT_CRITIQUE_CHAPTER_ID;
+  const scoped = args.questions ?? args.pack.questions;
   const byId = new Map<string, CritiqueItemResult>();
   for (const item of raw?.items ?? []) {
     const n = normalizeItem(item, args.pack);
-    if (n) byId.set(n.questionId, n);
+    if (n && scoped.some((q) => q.id === n.questionId)) {
+      byId.set(n.questionId, n);
+    }
   }
-  const items = args.pack.questions.map((q) => {
+  const items = scoped.map((q) => {
     const existing = byId.get(q.id);
     if (existing) return existing;
     return {
@@ -544,7 +610,7 @@ export function normalizeCritiquePayload(
     id: createId(),
     packId: args.pack.id,
     chapterId: args.chapter.id,
-    chapterTitle: args.chapter.title,
+    chapterTitle: manuscript ? MANUSCRIPT_CRITIQUE_TITLE : args.chapter.title,
     createdAt: Date.now(),
     summary: (raw?.summary ?? "").trim().slice(0, 1600),
     items,
@@ -565,7 +631,7 @@ export function normalizeCritiquePayload(
           ? m.kind
           : "pattern",
       text: m.text.trim().slice(0, 400),
-      chapterId: args.chapter.id,
+      chapterId: manuscript ? undefined : args.chapter.id,
     }));
 
   return { review, memoryUpdates };
@@ -575,6 +641,7 @@ export function mergeCritiqueReview(
   state: CritiqueState,
   review: CritiqueReview,
   memoryUpdates: CritiqueMemoryNote[],
+  options?: { mergeItems?: boolean },
 ): CritiqueState {
   const memory = [...memoryUpdates, ...(state.memory ?? [])]
     .filter(
@@ -587,11 +654,46 @@ export function mergeCritiqueReview(
     )
     .slice(0, MAX_CRITIQUE_MEMORY);
 
+  const prior = (state.reviews ?? []).find(
+    (r) => r.packId === review.packId && r.chapterId === review.chapterId,
+  );
+
+  let finalReview = review;
+  if (options?.mergeItems) {
+    const pack = packById(review.packId);
+    const byId = new Map(
+      (prior?.items ?? []).map((item) => [item.questionId, item]),
+    );
+    for (const item of review.items) {
+      byId.set(item.questionId, item);
+    }
+    if (pack) {
+      const items = pack.questions.map((q) => {
+        const existing = byId.get(q.id);
+        return (
+          existing ?? {
+            questionId: q.id,
+            sectionId: q.sectionId,
+            verdict: "partial" as const,
+            note: "Not reviewed yet — run this section when ready.",
+          }
+        );
+      });
+      finalReview = {
+        ...review,
+        summary: review.summary.trim()
+          ? review.summary
+          : (prior?.summary ?? review.summary),
+        items,
+      };
+    }
+  }
+
   const reviews = [
-    review,
+    finalReview,
     ...(state.reviews ?? []).filter(
       (r) =>
-        !(r.packId === review.packId && r.chapterId === review.chapterId),
+        !(r.packId === finalReview.packId && r.chapterId === finalReview.chapterId),
     ),
   ].slice(0, MAX_CRITIQUE_REVIEWS);
 
@@ -606,6 +708,17 @@ export function latestCritiqueReview(
   return (state?.reviews ?? []).find(
     (r) => r.packId === packId && r.chapterId === chapterId,
   );
+}
+
+export function isManuscriptCritiqueReview(review: CritiqueReview): boolean {
+  return review.chapterId === MANUSCRIPT_CRITIQUE_CHAPTER_ID;
+}
+
+export function latestManuscriptCritiqueReview(
+  state: CritiqueState | undefined,
+  packId: CritiquePackId,
+): CritiqueReview | undefined {
+  return latestCritiqueReview(state, packId, MANUSCRIPT_CRITIQUE_CHAPTER_ID);
 }
 
 export function memoryForPack(
@@ -627,7 +740,13 @@ export function visibleCritiqueItems(
   items: CritiqueItemResult[],
   showNa = false,
 ): CritiqueItemResult[] {
-  return showNa ? items : items.filter((i) => i.verdict !== "n/a");
+  const filtered = showNa ? items : items.filter((i) => i.verdict !== "n/a");
+  return [...filtered].sort((a, b) => {
+    const rank = (v: CritiqueVerdict) =>
+      v === "no" ? 0 : v === "partial" ? 1 : v === "yes" ? 2 : 3;
+    const diff = rank(a.verdict) - rank(b.verdict);
+    return diff !== 0 ? diff : a.questionId.localeCompare(b.questionId);
+  });
 }
 
 export function groupCritiqueItems(
@@ -645,6 +764,125 @@ export function groupCritiqueItems(
       items: items.filter((i) => i.sectionId === sectionId),
     }))
     .filter((g) => g.items.length > 0);
+}
+
+export type OpenCritiqueIssue = {
+  chapterId: string;
+  chapterTitle: string;
+  packId: CritiquePackId;
+  packName: string;
+  sectionId: CritiqueSectionId;
+  sectionLabel: string;
+  questionId: string;
+  prompt: string;
+  verdict: CritiqueVerdict;
+  note: string;
+  excerpt?: string;
+  suggestion?: string;
+};
+
+/** All no/partial checklist items across the manuscript. */
+export function openCritiqueIssues(
+  state: CritiqueState | undefined,
+  chapters: Pick<Chapter, "id" | "title">[],
+  packId?: CritiquePackId,
+): OpenCritiqueIssue[] {
+  const chapterOrder = new Map(chapters.map((c, i) => [c.id, i]));
+  const issues: OpenCritiqueIssue[] = [];
+
+  for (const review of state?.reviews ?? []) {
+    if (packId && review.packId !== packId) continue;
+    const pack = packById(review.packId);
+    if (!pack) continue;
+    const chapterTitle =
+      review.chapterId === MANUSCRIPT_CRITIQUE_CHAPTER_ID
+        ? MANUSCRIPT_CRITIQUE_TITLE
+        : (chapters.find((c) => c.id === review.chapterId)?.title ??
+          review.chapterTitle);
+
+    for (const item of review.items) {
+      if (item.verdict !== "no" && item.verdict !== "partial") continue;
+      const q = pack.questions.find((qq) => qq.id === item.questionId);
+      issues.push({
+        chapterId: review.chapterId,
+        chapterTitle,
+        packId: review.packId,
+        packName: pack.name,
+        sectionId: item.sectionId,
+        sectionLabel: CRITIQUE_SECTION_META[item.sectionId].label,
+        questionId: item.questionId,
+        prompt: q?.prompt ?? item.questionId,
+        verdict: item.verdict,
+        note: item.note,
+        excerpt: item.excerpt,
+        suggestion: item.suggestion,
+      });
+    }
+  }
+
+  const verdictRank = (v: CritiqueVerdict) => (v === "no" ? 0 : 1);
+  return issues.sort((a, b) => {
+    const ao = chapterOrder.get(a.chapterId) ?? 999;
+    const bo = chapterOrder.get(b.chapterId) ?? 999;
+    if (ao !== bo) return ao - bo;
+    const diff = verdictRank(a.verdict) - verdictRank(b.verdict);
+    return diff !== 0 ? diff : a.prompt.localeCompare(b.prompt);
+  });
+}
+
+export function formatCritiqueNoteBlock(args: {
+  packName: string;
+  prompt: string;
+  verdict: CritiqueVerdict;
+  note: string;
+  excerpt?: string;
+  suggestion?: string;
+}): string {
+  const lines = [
+    "— Critique —",
+    `${args.packName}: ${args.prompt}`,
+    `${args.verdict === "n/a" ? "N/A" : args.verdict.toUpperCase()} — ${args.note.trim()}`,
+    args.excerpt?.trim() ? `“${args.excerpt.trim().slice(0, 220)}”` : "",
+    args.suggestion?.trim() ? `Watch for: ${args.suggestion.trim()}` : "",
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+const VERDICT_PRIORITY: Record<CritiqueVerdict, number> = {
+  no: 0,
+  partial: 1,
+  yes: 2,
+  "n/a": 3,
+};
+
+/** Merge checklist rows from multiple review windows — keep the strictest verdict. */
+export function mergeCritiqueWindowItems(
+  questions: CritiquePackQuestion[],
+  windowResults: CritiqueItemResult[][],
+): CritiqueItemResult[] {
+  const byId = new Map<string, CritiqueItemResult>();
+  for (const items of windowResults) {
+    for (const item of items) {
+      const existing = byId.get(item.questionId);
+      if (
+        !existing ||
+        VERDICT_PRIORITY[item.verdict] < VERDICT_PRIORITY[existing.verdict]
+      ) {
+        byId.set(item.questionId, item);
+      }
+    }
+  }
+  return questions.map((q) => {
+    const existing = byId.get(q.id);
+    return (
+      existing ?? {
+        questionId: q.id,
+        sectionId: q.sectionId,
+        verdict: "partial" as const,
+        note: "Insufficient evidence in the windows reviewed.",
+      }
+    );
+  });
 }
 
 function bibleSnippet(
@@ -671,11 +909,25 @@ export function buildCritiqueContext(args: {
   pack: CritiquePack;
   memory: CritiqueMemoryNote[];
   reviews: CritiqueReview[];
+  sections?: CritiqueSectionId[];
+  previousChapter?: Pick<Chapter, "id" | "title" | "content"> | null;
+  plainOverride?: string;
+  windowNote?: string;
 }): string {
-  const plain = truncateChapterPlain(chapterToPlainText(args.chapter.content));
+  const scopedQuestions = questionsForCritiqueRun(args.pack, args.sections);
+  const plain =
+    args.plainOverride ??
+    truncateChapterPlain(chapterToPlainText(args.chapter.content));
   const chapterIndex = args.book.chapters.findIndex(
     (c) => c.id === args.chapter.id,
   );
+  const chapterNumber = chapterIndex >= 0 ? chapterIndex + 1 : null;
+  const prevMeta =
+    args.previousChapter ??
+    (chapterIndex > 0 ? args.book.chapters[chapterIndex - 1] : null);
+  const leftOff = prevMeta
+    ? chapterEndingPlain(prevMeta.content ?? "")
+    : "";
   const prior = args.book.chapters
     .slice(0, Math.max(0, chapterIndex))
     .map((c, i) => {
@@ -703,7 +955,12 @@ export function buildCritiqueContext(args: {
       ? "(none yet)"
       : args.memory
           .slice(0, 20)
-          .map((m) => `- [${m.kind}] ${m.text}`)
+          .map((m) => {
+            const chapterLabel = m.chapterId
+              ? args.book.chapters.find((c) => c.id === m.chapterId)?.title
+              : null;
+            return `- [${m.kind}]${chapterLabel ? ` (${chapterLabel})` : ""} ${m.text}`;
+          })
           .join("\n");
 
   const cast = (args.book.characters ?? []).slice(0, 28).map((c) => {
@@ -735,7 +992,7 @@ export function buildCritiqueContext(args: {
   });
 
   const bySection = groupCritiqueItems(
-    args.pack.questions.map((q) => ({
+    scopedQuestions.map((q) => ({
       questionId: q.id,
       sectionId: q.sectionId,
       verdict: "partial" as const,
@@ -746,7 +1003,7 @@ export function buildCritiqueContext(args: {
 
   const questions = bySection
     .map((sec) => {
-      const lines = args.pack.questions
+      const lines = scopedQuestions
         .filter((q) => q.sectionId === sec.sectionId)
         .map(
           (q) =>
@@ -757,12 +1014,26 @@ export function buildCritiqueContext(args: {
     })
     .join("\n\n");
 
+  const sectionNote =
+    args.sections?.length && args.pack.id === "smart"
+      ? `This run covers: ${args.sections.map((id) => CRITIQUE_SECTION_META[id].label).join(", ")}.`
+      : "";
+
   return [
+    args.windowNote ? args.windowNote : "",
     `Manuscript: ${args.book.title || "Untitled"}`,
     args.book.author ? `Author: ${args.book.author}` : "",
+    chapterNumber
+      ? `Place in book: chapter ${chapterNumber} of ${args.book.chapters.length}`
+      : "",
     `Critique pack: ${args.pack.name}`,
+    sectionNote,
     `Pack posture: ${args.pack.blurb}`,
     `Chapter under review: ${args.chapter.title}`,
+    "",
+    leftOff
+      ? `WHERE THE READER LEFT OFF (end of previous chapter — judge the handoff into this one):\n${leftOff}`
+      : "WHERE THE READER LEFT OFF: (opening chapter)",
     "",
     "DURABLE PACK MEMORY (patterns from earlier chapters — stay consistent; do not re-lecture settled patterns unless they recur here):",
     memoryBlock,
@@ -786,34 +1057,52 @@ export function buildCritiqueContext(args: {
     .join("\n");
 }
 
-export function critiqueSystemPrompt(pack: CritiquePack): string {
+export function critiqueSystemPrompt(
+  pack: CritiquePack,
+  sections?: CritiqueSectionId[],
+): string {
+  const scoped = questionsForCritiqueRun(pack, sections);
+  const sectionNames =
+    sections?.length && pack.id === "smart"
+      ? sections.map((id) => CRITIQUE_SECTION_META[id].label).join(", ")
+      : pack.name;
+
   const naHint =
     pack.id === "smart"
       ? `- Use verdict n/a when a Fantasy question has no magic/worldbuilding to judge, or a Romance question has no romantic relationship on the page or in digests. Do not invent genre problems.
-- For Character & arc: judge from this chapter + digests; use partial + “insufficient evidence” freely for whole-book ending items.`
+- For Character & arc: judge from this chapter + digests + the handoff from the previous chapter; use partial + “insufficient evidence” freely for whole-book ending items.`
       : `- Prefer yes / partial / no; use n/a only if the chapter is too thin to judge that item.`;
 
-  return `You are a craft critic for a working novelist — not a copy editor and not a rewriter.
-You apply the “${pack.name}” checklist to ONE chapter, using the book bible and prior digests when the chapter is thin.
+  return `You are a craft critic for a working novelist — not a copy editor, not a beta reader, and not a rewriter.
+You are reviewing ONE chapter in the middle of a novel, using the checklist for ${sectionNames}.
+
+Your job is diagnostic: name what is working, what is at risk, and what fails — in THIS chapter, on the page.
+Lead with the chapter’s real pressures (handoff, scene shape, relationship movement, arc pressure) — not abstract craft lecture.
 
 HARD RULES:
 - Do NOT rewrite, insert, or paste replacement prose into the manuscript.
-- Answer EVERY checklist question id exactly once.
+- Answer EVERY checklist question id in this run exactly once.
 - verdict must be yes, partial, no, or n/a.
 ${naHint}
 - For no or partial: prefer a short verbatim excerpt from the chapter when evidence exists; say so plainly when evidence is insufficient.
 - For n/a: note briefly why it does not apply (one short sentence). No excerpt needed.
-- note: spare diagnostic (what holds or fails). suggestion: one gentle “watch for…” seed — never a polished rewrite ready to paste. Skip suggestion on n/a.
+- note: specific and chapter-grounded (what holds or fails here). suggestion: one gentle “watch for…” seed — never a polished rewrite ready to paste. Skip suggestion on n/a.
+- summary: 3–5 sentences as a critique letter — top strengths, top risks, and whether the chapter earns its place in the book right now.
 - memoryUpdates: only durable patterns worth remembering later (max 5). Skip one-off nits and n/a noise.
-- Use prior digests and memory: do not repeat the same critique of something already established earlier unless it newly fails in this chapter.
+- Use prior digests, memory, and the previous chapter ending: judge the HANDOFF. Do not repeat settled patterns unless they newly fail here.
 - Be specific. No cheerleading. No marketing tone. No brand-name lecture (do not say Truby, Story Genius, Romancing the Beat).
 - Prefer concrete contradictions over vague vibes.
 
-Pack: ${pack.blurb}`;
+Pack: ${pack.blurb}
+Questions in this run: ${scoped.length}`;
 }
 
-export function critiqueToolForPack(pack: CritiquePack): Anthropic.Tool {
-  const questionIds = pack.questions.map((q) => q.id);
+export function critiqueToolForPack(
+  pack: CritiquePack,
+  sections?: CritiqueSectionId[],
+): Anthropic.Tool {
+  const scoped = questionsForCritiqueRun(pack, sections);
+  const questionIds = scoped.map((q) => q.id);
   return {
     name: CRITIQUE_TOOL,
     description:
@@ -876,4 +1165,191 @@ export function critiqueToolForPack(pack: CritiquePack): Anthropic.Tool {
       required: ["summary", "items"],
     },
   };
+}
+
+export function partitionManuscriptCritiqueWindows(
+  chapters: Pick<Chapter, "title" | "content">[],
+  maxChars = MANUSCRIPT_CRITIQUE_WINDOW_CHARS,
+): ManuscriptBetaWindow[] {
+  return partitionManuscriptBetaWindows(chapters, maxChars);
+}
+
+export function buildManuscriptCritiqueContext(args: {
+  book: Pick<
+    Book,
+    | "title"
+    | "author"
+    | "characters"
+    | "locations"
+    | "encyclopedia"
+    | "research"
+    | "chapters"
+  >;
+  pack: CritiquePack;
+  window: ManuscriptBetaWindow;
+  memory: CritiqueMemoryNote[];
+  chapterReviews: CritiqueReview[];
+  sections?: CritiqueSectionId[];
+  previousWindowEnding?: string;
+}): string {
+  const scopedQuestions = questionsForCritiqueRun(args.pack, args.sections);
+  const chapters = args.book.chapters ?? [];
+  const isFinal = args.window.index === args.window.total - 1;
+
+  const toc = chapters
+    .map((c, i) => `${i + 1}. ${c.title || "Untitled"}`)
+    .join("\n");
+
+  const priorChapterCritiques = args.chapterReviews
+    .filter((r) => r.chapterId !== MANUSCRIPT_CRITIQUE_CHAPTER_ID)
+    .map((r) => {
+      const idx = chapters.findIndex((c) => c.id === r.chapterId);
+      const title =
+        chapters[idx]?.title ?? r.chapterTitle ?? `Chapter ${idx + 1}`;
+      const openItems = r.items
+        .filter((it) => it.verdict === "no" || it.verdict === "partial")
+        .slice(0, 3)
+        .map((it) => `${it.questionId}: ${it.note.slice(0, 80)}`)
+        .join("; ");
+      return `- Ch ${idx >= 0 ? idx + 1 : "?"} “${title}” (${r.packId}): ${r.summary.slice(0, 160)}${openItems ? ` · open: ${openItems}` : ""}`;
+    })
+    .slice(-12);
+
+  const memoryBlock =
+    args.memory.length === 0
+      ? "(none yet)"
+      : args.memory
+          .slice(0, 24)
+          .map((m) => {
+            const chapterLabel = m.chapterId
+              ? chapters.find((c) => c.id === m.chapterId)?.title
+              : null;
+            return `- [${m.kind}]${chapterLabel ? ` (${chapterLabel})` : ""} ${m.text}`;
+          })
+          .join("\n");
+
+  const cast = (args.book.characters ?? []).slice(0, 28).map((c) => {
+    const asOf = continuityNotesForPrompt(c.continuityNotes, 2);
+    return `- ${c.name}${c.shortBio ? `: ${c.shortBio}` : ""}${
+      asOf ? `\n  ${asOf.split("\n").join("\n  ")}` : ""
+    }`;
+  });
+
+  const places = (args.book.locations ?? ([] as Location[])).slice(0, 28).map(
+    (l) => {
+      const asOf = continuityNotesForPrompt(l.continuityNotes, 2);
+      return `- ${l.name}${l.shortBio ? `: ${l.shortBio}` : ""}${
+        asOf ? `\n  ${asOf.split("\n").join("\n  ")}` : ""
+      }`;
+    },
+  );
+
+  const bySection = groupCritiqueItems(
+    scopedQuestions.map((q) => ({
+      questionId: q.id,
+      sectionId: q.sectionId,
+      verdict: "partial" as const,
+      note: "",
+    })),
+    args.pack,
+  );
+
+  const questions = bySection
+    .map((sec) => {
+      const lines = scopedQuestions
+        .filter((q) => q.sectionId === sec.sectionId)
+        .map(
+          (q) =>
+            `- ${q.id}: ${q.prompt}\n  Red flag if no: ${q.redFlag}`,
+        )
+        .join("\n");
+      return `## ${sec.label}\n${lines}`;
+    })
+    .join("\n\n");
+
+  const sectionNote =
+    args.sections?.length && args.pack.id === "smart"
+      ? `This run covers: ${args.sections.map((id) => CRITIQUE_SECTION_META[id].label).join(", ")}.`
+      : "";
+
+  const windowNote = [
+    `READING WINDOW ${args.window.index + 1} of ${args.window.total}: ${args.window.label}.`,
+    isFinal
+      ? "This is the FINAL stretch — you may judge whole-book items (ending, arc completion, romance resolution)."
+      : "You have NOT finished the book — use partial + “insufficient evidence in this section” for ending/arc/romance-resolution items not yet visible. Judge scene-level items only where evidence appears in THIS window.",
+  ].join(" ");
+
+  return [
+    windowNote,
+    `FULL MANUSCRIPT critique — cover to cover, not a single chapter workshop.`,
+    `Manuscript: ${args.book.title || "Untitled"}`,
+    args.book.author ? `Author: ${args.book.author}` : "",
+    `Critique pack: ${args.pack.name}`,
+    sectionNote,
+    `Pack posture: ${args.pack.blurb}`,
+    "",
+    toc ? `TABLE OF CONTENTS:\n${toc}` : "",
+    "",
+    priorChapterCritiques.length
+      ? `OPTIONAL — chapter-level critiques already run in Folio (may color memory, but judge THIS text fresh):\n${priorChapterCritiques.join("\n")}`
+      : "",
+    "",
+    "DURABLE PACK MEMORY (patterns from this full-manuscript read so far):",
+    memoryBlock,
+    "",
+    args.previousWindowEnding
+      ? `WHERE YOU LEFT OFF in the last reading window:\n${args.previousWindowEnding}`
+      : "You are starting from the beginning of the manuscript.",
+    "",
+    bibleSnippet("CAST", cast, 28),
+    bibleSnippet("PLACES", places, 28),
+    "",
+    "CHECKLIST — answer EVERY question id with yes | partial | no | n/a:",
+    questions,
+    "",
+    "TEXT FOR THIS WINDOW:",
+    args.window.plain || "(empty)",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function critiqueManuscriptSystemPrompt(
+  pack: CritiquePack,
+  sections?: CritiqueSectionId[],
+): string {
+  const scoped = questionsForCritiqueRun(pack, sections);
+  const sectionNames =
+    sections?.length && pack.id === "smart"
+      ? sections.map((id) => CRITIQUE_SECTION_META[id].label).join(", ")
+      : pack.name;
+
+  const naHint =
+    pack.id === "smart"
+      ? `- Use verdict n/a when a Fantasy question has no magic/worldbuilding to judge, or a Romance question has no romantic relationship in the manuscript.
+- For Character & arc and ending items: on non-final windows use partial + “insufficient evidence in this section”; on the final window judge the whole book.`
+      : `- Interpret Pressure items book-wide: stakes across the story, protagonist agency over the manuscript, cause-and-effect chains, and whether endings pull the reader on.
+- Use n/a only if the manuscript is too thin to judge that item.`;
+
+  return `You are a craft critic for a working novelist — not a copy editor, not a beta reader, and not a rewriter.
+You are reviewing the FULL MANUSCRIPT cover to cover, using the checklist for ${sectionNames}.
+
+Your job is diagnostic: name what is working, what is at risk, and what fails — across the book, grounded in the prose you can see in this reading window.
+On the final window, step back: opening hold, middle drag, ending land, arc payoff.
+
+HARD RULES:
+- Do NOT rewrite, insert, or paste replacement prose into the manuscript.
+- Answer EVERY checklist question id in this run exactly once.
+- verdict must be yes, partial, no, or n/a.
+${naHint}
+- For no or partial: prefer a short verbatim excerpt when evidence exists; say so plainly when evidence is insufficient in this window.
+- For n/a: note briefly why it does not apply (one short sentence). No excerpt needed.
+- note: specific and book-grounded. suggestion: one gentle “watch for…” seed — never a polished rewrite. Skip suggestion on n/a.
+- summary: 3–6 sentences as a critique letter for THIS window’s reading — top strengths, top risks. On the final window, include whole-book verdict.
+- memoryUpdates: only durable patterns worth remembering (max 5). Skip one-off nits.
+- Be specific. No cheerleading. No marketing tone. No brand-name lecture.
+- Prefer concrete contradictions over vague vibes.
+
+Pack: ${pack.blurb}
+Questions in this run: ${scoped.length}`;
 }

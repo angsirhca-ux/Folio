@@ -10,7 +10,7 @@ export const CLARENCE = {
     "Clarence applies seeds from his manuscript reading to this shelf",
   composeSoundtrackLabel: "Compose with Clarence",
   composeSoundtrackTitle:
-    "Clarence builds a fifteen-song soundtrack from his manuscript reading",
+    "Clarence builds a fifteen-slot score from your favorite artists (up to 4) plus the manuscript reading",
   rereadLabel: "Ask Clarence to reread",
   rereadTitle: "Force a fresh full manuscript reading",
   firstReadLabel: "Have Clarence read",

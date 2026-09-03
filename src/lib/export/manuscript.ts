@@ -4,10 +4,18 @@ import {
   type SceneBreakStyle,
 } from "./compile";
 
+export type ManuscriptInlineRun = {
+  text: string;
+  bold?: boolean;
+  italic?: boolean;
+};
+
 export interface ManuscriptBlock {
   type: "heading" | "paragraph" | "scene-break" | "blockquote";
   level?: 1 | 2 | 3;
+  /** Plain text (concatenation of runs). */
   text: string;
+  runs?: ManuscriptInlineRun[];
 }
 
 /** Strip tags and decode common entities for plain text. */
@@ -36,7 +44,7 @@ export function htmlToPlainText(html: string): string {
     .trim();
 }
 
-function decodeEntities(text: string): string {
+export function decodeEntities(text: string): string {
   return text
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&")
@@ -57,13 +65,69 @@ function decodeEntities(text: string): string {
     );
 }
 
-function stripInline(html: string): string {
-  return decodeEntities(
-    html
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/?(strong|b|em|i|span|a)[^>]*>/gi, "")
-      .replace(/<[^>]+>/g, ""),
-  ).trim();
+function mergeAdjacentRuns(runs: ManuscriptInlineRun[]): ManuscriptInlineRun[] {
+  const merged: ManuscriptInlineRun[] = [];
+  for (const run of runs) {
+    if (!run.text) continue;
+    const prev = merged[merged.length - 1];
+    if (
+      prev &&
+      Boolean(prev.bold) === Boolean(run.bold) &&
+      Boolean(prev.italic) === Boolean(run.italic)
+    ) {
+      prev.text += run.text;
+    } else {
+      merged.push({ ...run });
+    }
+  }
+  return merged;
+}
+
+/** Parse inline strong/em from Tiptap HTML into styled runs. */
+export function parseInlineRuns(html: string): ManuscriptInlineRun[] {
+  const normalized = html.replace(/<br\s*\/?>/gi, " ");
+  const tokens = normalized.split(/(<\/?(?:strong|b|em|i)>)/gi);
+  const runs: ManuscriptInlineRun[] = [];
+  let bold = false;
+  let italic = false;
+
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    if (lower === "<strong>" || lower === "<b>") {
+      bold = true;
+      continue;
+    }
+    if (lower === "</strong>" || lower === "</b>") {
+      bold = false;
+      continue;
+    }
+    if (lower === "<em>" || lower === "<i>") {
+      italic = true;
+      continue;
+    }
+    if (lower === "</em>" || lower === "</i>") {
+      italic = false;
+      continue;
+    }
+
+    const text = decodeEntities(token.replace(/<[^>]+>/g, ""));
+    if (!text) continue;
+    runs.push({
+      text,
+      bold: bold || undefined,
+      italic: italic || undefined,
+    });
+  }
+
+  return mergeAdjacentRuns(runs);
+}
+
+export function runsPlainText(runs: ManuscriptInlineRun[]): string {
+  return runs.map((r) => r.text).join("");
+}
+
+export function blockPlainText(block: ManuscriptBlock): string {
+  return block.runs?.length ? runsPlainText(block.runs) : block.text;
 }
 
 function isSceneBreak(text: string): boolean {
@@ -77,6 +141,40 @@ function isSceneBreak(text: string): boolean {
   );
 }
 
+function blockFromInner(
+  tag: string,
+  inner: string,
+  classAttr: string,
+): ManuscriptBlock | null {
+  const runs = parseInlineRuns(inner);
+  const text = runsPlainText(runs);
+
+  if (!text && tag === "p") return null;
+
+  if (tag.startsWith("h")) {
+    const level = Number(tag[1]) as 1 | 2 | 3;
+    return { type: "heading", level, text, runs: runs.length ? runs : undefined };
+  }
+
+  if (tag === "blockquote") {
+    return {
+      type: "blockquote",
+      text,
+      runs: runs.length ? runs : undefined,
+    };
+  }
+
+  if (classAttr.includes("scene-break") || isSceneBreak(text)) {
+    return { type: "scene-break", text: "* * *" };
+  }
+
+  return {
+    type: "paragraph",
+    text,
+    runs: runs.length ? runs : undefined,
+  };
+}
+
 /** Parse Tiptap/chapter HTML into typed manuscript blocks. */
 export function parseChapterBlocks(html: string): ManuscriptBlock[] {
   const blocks: ManuscriptBlock[] = [];
@@ -88,30 +186,10 @@ export function parseChapterBlocks(html: string): ManuscriptBlock[] {
     const tag = match[1].toLowerCase();
     const inner = match[3];
     const classAttr = match[2] ?? "";
-    const text = stripInline(inner);
-
-    if (!text && tag === "p") continue;
-
-    if (tag.startsWith("h")) {
-      const level = Number(tag[1]) as 1 | 2 | 3;
-      blocks.push({ type: "heading", level, text });
-      continue;
-    }
-
-    if (tag === "blockquote") {
-      blocks.push({ type: "blockquote", text });
-      continue;
-    }
-
-    if (classAttr.includes("scene-break") || isSceneBreak(text)) {
-      blocks.push({ type: "scene-break", text: "* * *" });
-      continue;
-    }
-
-    blocks.push({ type: "paragraph", text });
+    const block = blockFromInner(tag, inner, classAttr);
+    if (block) blocks.push(block);
   }
 
-  // Fallback if parser found nothing but content exists
   if (blocks.length === 0 && htmlToPlainText(html)) {
     const plain = htmlToPlainText(html);
     for (const para of plain.split(/\n\n+/)) {
@@ -123,6 +201,31 @@ export function parseChapterBlocks(html: string): ManuscriptBlock[] {
   }
 
   return blocks;
+}
+
+export function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+export function runsToXhtml(runs: ManuscriptInlineRun[]): string {
+  return runs
+    .map((run) => {
+      let text = escapeXml(run.text);
+      if (run.bold) text = `<strong>${text}</strong>`;
+      if (run.italic) text = `<em>${text}</em>`;
+      return text;
+    })
+    .join("");
+}
+
+export function blockToXhtmlInner(block: ManuscriptBlock): string {
+  if (block.runs?.length) return runsToXhtml(block.runs);
+  return escapeXml(block.text);
 }
 
 export function sanitizeFilename(name: string): string {
@@ -138,21 +241,44 @@ export function bookFilename(book: Book, ext: string): string {
   return `${base}.${ext}`;
 }
 
-export function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+export function frontMatterSectionToXhtml(section: {
+  id: string;
+  paragraphs: string[];
+  attribution?: string;
+  variant?: "copyright";
+}): string {
+  const className =
+    section.variant === "copyright"
+      ? "front-matter copyright"
+      : "front-matter";
+  const paras = section.paragraphs
+    .map((p) => `<p>${escapeXml(p)}</p>`)
+    .join("\n");
+  const attr = section.attribution
+    ? `<p class="attribution">${escapeXml(section.attribution)}</p>`
+    : "";
+  return `<section class="${className}" epub:type="${section.id}">
+${paras}
+${attr}
+</section>`;
 }
+
+export function partDividerXhtml(label: string): string {
+  return `<section class="part-divider" epub:type="part"><h1>${escapeXml(label)}</h1></section>`;
+}
+
+export type ChapterXhtmlOptions = {
+  sceneBreak?: SceneBreakStyle;
+  suppressTitle?: boolean;
+};
 
 /** Convert chapter HTML into clean XHTML body fragment for EPUB. */
 export function chapterToXhtmlBody(
   chapter: Chapter,
-  options?: { sceneBreak?: SceneBreakStyle },
+  options?: ChapterXhtmlOptions,
 ): string {
   const style = options?.sceneBreak ?? "asterisks";
+  const suppressTitle = options?.suppressTitle ?? chapter.compile?.suppressTitle;
   const blocks = applySceneBreakStyle(
     parseChapterBlocks(chapter.content),
     style,
@@ -162,9 +288,7 @@ export function chapterToXhtmlBody(
   for (const block of blocks) {
     if (block.type === "heading") {
       const level = block.level ?? 1;
-      parts.push(
-        `<h${level}>${escapeXml(block.text)}</h${level}>`,
-      );
+      parts.push(`<h${level}>${blockToXhtmlInner(block)}</h${level}>`);
     } else if (block.type === "scene-break") {
       if (style === "blank") {
         parts.push(`<p class="scene-break scene-break-blank">&#160;</p>`);
@@ -174,15 +298,16 @@ export function chapterToXhtmlBody(
         );
       }
     } else if (block.type === "blockquote") {
-      parts.push(`<blockquote><p>${escapeXml(block.text)}</p></blockquote>`);
+      parts.push(
+        `<blockquote><p>${blockToXhtmlInner(block)}</p></blockquote>`,
+      );
     } else {
-      parts.push(`<p>${escapeXml(block.text)}</p>`);
+      parts.push(`<p>${blockToXhtmlInner(block)}</p>`);
     }
   }
 
-  // Ensure chapter has at least a title heading if content had none
   const hasH1 = blocks.some((b) => b.type === "heading" && b.level === 1);
-  if (!hasH1) {
+  if (!hasH1 && !suppressTitle) {
     parts.unshift(`<h1>${escapeXml(chapter.title)}</h1>`);
   }
 

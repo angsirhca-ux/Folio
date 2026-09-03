@@ -155,6 +155,12 @@ body {
 
 .manuscript-editor p {
   margin: 0;
+  letter-spacing: 0.01em;
+  position: relative;
+}
+
+/* Justify body prose only — scene breaks and ornaments must stay centered. */
+.manuscript-editor .ProseMirror > p:not(.scene-break):not([data-type="scene-break"]) {
   text-align: justify;
   text-align-last: left;
   text-justify: inter-word;
@@ -211,11 +217,6 @@ body {
   border: none;
 }
 
-/* Scene break: centered ornaments when paragraph is only * * * */
-.manuscript-editor p {
-  position: relative;
-}
-
 .ProseMirror p.is-empty::before,
 .ProseMirror .is-empty::before {
   color: var(--ink-faint);
@@ -252,33 +253,26 @@ body {
   transition: opacity 0.35s var(--ease-apple);
 }
 
-.manuscript-editor p {
-  letter-spacing: 0.01em;
-}
-
-/* Empty editable shells only — do NOT use :has(> br:only-child).
-   TipTap puts a trailing <br> in many paragraphs; text nodes don’t count as
-   siblings, so that selector was centering the whole manuscript. */
 .manuscript-editor .ProseMirror > p.is-empty {
   text-align: left;
   text-indent: 0;
 }
 
-/* Scene break ornaments — true center.
-   Do NOT letter-space the <p> itself (that shifts glyphs left under
-   justify / flex). Space the mark on an inner span and cancel the
-   trailing letter-spacing with a matching negative margin. */
+/* Scene break ornaments — flex center; node-view inline styles are primary. */
 .manuscript-editor .ProseMirror p.scene-break,
 .manuscript-editor .ProseMirror p[data-type="scene-break"],
-.manuscript-editor .ProseMirror > p.scene-break {
-  display: block !important;
+.manuscript-editor p.scene-break,
+.manuscript-editor p[data-type="scene-break"] {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
   box-sizing: border-box !important;
   width: 100% !important;
-  max-width: 100% !important;
+  max-width: none !important;
   margin: 1.6em 0 !important;
-  margin-left: 0 !important;
-  margin-right: 0 !important;
+  margin-inline: 0 !important;
   padding: 0 !important;
+  padding-inline: 0 !important;
   text-align: center !important;
   text-align-last: center !important;
   text-indent: 0 !important;
@@ -286,19 +280,30 @@ body {
   letter-spacing: normal !important;
   hyphens: none !important;
   -webkit-hyphens: none !important;
-  color: var(--ink-muted);
-  font-family: var(--font-display);
+  color: var(--ink-muted) !important;
+  font-family: var(--font-display) !important;
   user-select: none;
   cursor: default;
+  position: relative !important;
+  float: none !important;
+  clear: both !important;
 }
 
 .manuscript-editor .ProseMirror p.scene-break .scene-break-mark,
-.manuscript-editor .ProseMirror p[data-type="scene-break"] .scene-break-mark {
-  display: inline-block;
-  letter-spacing: 0.55em;
-  margin-right: -0.55em; /* optical center — cancels trailing letter-space */
-  font-family: var(--font-display);
-  color: var(--ink-muted);
+.manuscript-editor .ProseMirror p[data-type="scene-break"] .scene-break-mark,
+.manuscript-editor p.scene-break .scene-break-mark,
+.manuscript-editor p[data-type="scene-break"] .scene-break-mark {
+  display: inline !important;
+  position: static !important;
+  left: auto !important;
+  transform: none !important;
+  letter-spacing: normal !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  white-space: pre !important;
+  float: none !important;
+  font-family: var(--font-display) !important;
+  color: var(--ink-muted) !important;
   pointer-events: none;
 }
 

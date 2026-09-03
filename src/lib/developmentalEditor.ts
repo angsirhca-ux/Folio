@@ -23,10 +23,15 @@ export const REVIEW_TOOL_NAME = "save_editorial_review";
 export const CHAPTER_PLAIN_BUDGET = 90_000;
 export const MAX_MEMORY_NOTES = 40;
 export const MAX_PASSES_KEPT = 24;
-/** Safety ceiling so a runaway response can’t hang the UI — not a “top 12 only” filter. */
-export const MAX_FLAGS_PER_PASS = 40;
-/** Flags-first tool output needs headroom — summaries used to starve the array. */
-export const REVIEW_MAX_TOKENS = 8192;
+/**
+ * Runaway guard after windows merge — not a quota. Prompts must not tell
+ * the model to stop at a round number.
+ */
+export const MAX_FLAGS_PER_PASS = 800;
+/** Per Claude window (one HTTP call). Windows add up; this is not a chapter quota. */
+export const MAX_FLAGS_PER_WINDOW = 200;
+/** Flags-first tool output needs headroom so a dense window isn’t truncated. */
+export const REVIEW_MAX_TOKENS = 16_384;
 /**
  * Long chapters are reviewed in windows of this size so each Claude call
  * finishes within a single client request (~2k words per window).
@@ -64,7 +69,7 @@ function migratePassKind(kind: string | undefined): DevelopmentalPassKind {
   ) {
     return kind;
   }
-  if (kind === "line") return "style";
+  if (kind === "line" || kind === "tense" || kind === "pov") return "style";
   return "style";
 }
 
@@ -85,6 +90,14 @@ function migrateFlagCategory(
         "redundancy",
         "word-choice",
         "dialogue-polish",
+        "wrong-tense",
+        "tense-shift",
+        "flashback-tense",
+        "sequence-of-tenses",
+        "head-hop",
+        "knowledge-slip",
+        "outside-access",
+        "person-shift",
         "telling",
         "pacing",
         "plot-holes",
@@ -412,6 +425,20 @@ const STYLE_CATEGORIES: DevelopmentalFlagCategory[] = [
   "dialogue-polish",
 ];
 
+const TENSE_CATEGORIES: DevelopmentalFlagCategory[] = [
+  "wrong-tense",
+  "tense-shift",
+  "flashback-tense",
+  "sequence-of-tenses",
+];
+
+const POV_CATEGORIES: DevelopmentalFlagCategory[] = [
+  "head-hop",
+  "knowledge-slip",
+  "outside-access",
+  "person-shift",
+];
+
 const STORY_CATEGORIES: DevelopmentalFlagCategory[] = [
   "telling",
   "pacing",
@@ -430,7 +457,7 @@ const ACTION_CATEGORIES: DevelopmentalFlagCategory[] = [
 export function categoriesForPass(
   kind: DevelopmentalPassKind,
 ): DevelopmentalFlagCategory[] {
-  if (kind === "style") return STYLE_CATEGORIES;
+  if (kind === "style") return [...STYLE_CATEGORIES, ...TENSE_CATEGORIES, ...POV_CATEGORIES];
   if (kind === "story") return STORY_CATEGORIES;
   if (kind === "action") return ACTION_CATEGORIES;
   return [
@@ -548,6 +575,75 @@ export function coerceFlagCategory(
       return "word-choice";
     }
     if (normalized === "dialogue") return "dialogue-polish";
+    if (
+      normalized === "tense" ||
+      normalized === "wrong" ||
+      normalized === "past" ||
+      normalized === "present" ||
+      normalized === "verb-tense" ||
+      normalized === "grammar"
+    ) {
+      return "wrong-tense";
+    }
+    if (
+      normalized === "shift" ||
+      normalized === "switch" ||
+      normalized === "slip" ||
+      normalized === "inconsistent"
+    ) {
+      return "tense-shift";
+    }
+    if (
+      normalized === "flashback" ||
+      normalized === "memory" ||
+      normalized === "analepsis"
+    ) {
+      return "flashback-tense";
+    }
+    if (
+      normalized === "sequence" ||
+      normalized === "reported" ||
+      normalized === "indirect" ||
+      normalized === "sequence-of-tense"
+    ) {
+      return "sequence-of-tenses";
+    }
+    if (
+      normalized === "pov" ||
+      normalized === "hop" ||
+      normalized === "headhop" ||
+      normalized === "head-hopping" ||
+      normalized === "viewpoint"
+    ) {
+      return "head-hop";
+    }
+    if (
+      normalized === "knowledge" ||
+      normalized === "knows" ||
+      normalized === "telepathy" ||
+      normalized === "author-intrusion" ||
+      normalized === "info"
+    ) {
+      return "knowledge-slip";
+    }
+    if (
+      normalized === "camera" ||
+      normalized === "outside" ||
+      normalized === "access" ||
+      normalized === "sensory" ||
+      normalized === "omniscient"
+    ) {
+      return "outside-access";
+    }
+    if (
+      normalized === "person" ||
+      normalized === "first-person" ||
+      normalized === "third-person" ||
+      normalized === "i-vs-she" ||
+      normalized === "we"
+    ) {
+      return "person-shift";
+    }
   }
   return null;
 }
@@ -593,7 +689,7 @@ export function normalizeReviewPayload(
       };
     })
     .filter(Boolean)
-    .slice(0, MAX_FLAGS_PER_PASS) as DevelopmentalFlag[];
+    .slice(0, MAX_FLAGS_PER_WINDOW) as DevelopmentalFlag[];
 
   const pass: DevelopmentalPass = {
     id: createId(),
@@ -1003,8 +1099,9 @@ HARD RULES:
 - Good suggestion pair (1st person chapter): (1) "Consider dropping the filter and letting the creature arrive as my vision clears." (2) "e.g. something like: the blur resolved into wet black fur and too many joints."
 - Good suggestion pair (3rd person chapter): (1) "Consider dropping the filter and letting the creature arrive as her vision clears." (2) "e.g. something like: the blur resolved into wet black fur and too many joints."
 - Excerpts must be copy-pasteable from the chapter — specific enough to locate (prefer under ~120 characters).
-- Flag every concrete issue you find in this chapter (don’t omit real problems to keep the list short). If the same issue recurs, flag representative moments rather than every identical repeat.
-- Soft upper bound: about ${MAX_FLAGS_PER_PASS} flags if the chapter is packed — prioritize distinct moments over duplicates.
+- Flag every distinct issue you find in this chapter (or this window). Do not stop at a round number. Do not drop tense/POV/line problems to keep the list short.
+- If the same issue recurs verbatim, flag a few representative moments — not every identical repeat, and not a single stand-in for different moments.
+- There is no target count. Packed chapters should produce many flags; thin/strong chapters should produce few.
 - Phrase suggestions as gentle options, not commands.
 - Flag ONLY the current chapter text provided. Other chapters are out of scope for flags.
 - Use AUTHOR PREFERENCES and EDITOR MEMORY to stay consistent: lean into patterns they liked; soften categories they disliked — but still flag genuine issues.
@@ -1017,7 +1114,7 @@ HARD RULES:
   if (kind === "style") {
     return `${shared}
 
-STYLE & LINE — line-level craft for this chapter only. Look for:
+STYLE & LINE — one chapter pass for prose, tense, and viewpoint. Infer the governing tense and POV first; name both in the summary (e.g. “Simple past, limited third through Mara.”). Then flag concrete slips.
 
 Mechanics
 1. filter-words — sensory/cognitive filters: saw, heard, noticed, felt, thought, realized, watched, seemed, appeared, etc.
@@ -1032,9 +1129,20 @@ Prose & dialogue
 8. word-choice — vague adjectives or limp diction (diagnose; EXAMPLE may sketch a tighter phrase, not a whole paragraph rewrite).
 9. dialogue-polish — unnatural or indistinct dialogue / clunky tags; use the voice bible when provided.
 
-For each real instance, add a flag with that line’s excerpt — do not only summarize patterns in the summary. Use only the category ids above. Soft cap ~${MAX_FLAGS_PER_PASS} if the chapter is dense with repeats.
+Tense (stay in the governing tense unless a shift is earned)
+10. wrong-tense — a verb in the wrong tense for the chapter’s default (present slips in past, leftover past in present). Include tags and interior thought.
+11. tense-shift — unmotivated switch mid-sentence, mid-paragraph, or mid-scene (not a marked flashback or lyric present).
+12. flashback-tense — a memory whose tense is muddy: didn’t shift, or didn’t return.
+13. sequence-of-tenses — reported speech, thought, conditionals, or mixed perfects that don’t follow the governing tense.
 
-Ignore story/plot/character-arc and show-vs-tell (those belong to Story & Structure). Stay at the line level — no plot holes, world-rule breaks, or book-wide continuity.`;
+POV (stay in the governing head)
+14. head-hop — interior thought/feeling from someone who is NOT the scene’s POV, without a scene break or consistent omniscience.
+15. knowledge-slip — the POV knows a fact they couldn’t (another mind, offstage event, author research as their thought).
+16. outside-access — camera or senses leave the POV body.
+17. person-shift — I/me vs she/he (or sudden we/you) against the established person.
+
+Do NOT flag: plot holes, show-vs-tell, kinetic dramatization (Story / Action), or book-wide chronology (Continuity). Dialogue from other people is not a hop. Deliberate omniscient that stays omniscient is not a hop.
+Use only the category ids above. Flag every distinct slip in this text — including tense and POV, not only filter-words.`;
   }
 
   if (kind === "action") {
@@ -1050,7 +1158,7 @@ Categories (use only these ids):
 5. named-emotion-action — emotion labeled where a gesture or concrete action beat could carry it (narrow — do not vacuum every telling).
 
 CRITICAL: Fill flags FIRST. Do not return summary-only. If you describe opportunities in the summary, each one that has a locatable sentence in the chapter MUST become a flag with that verbatim excerpt. Empty flags only when the chapter is already beat-by-beat dramatized with no missed kinetic openings. Keep summary to 1–2 sentences.
-Soft cap ~${MAX_FLAGS_PER_PASS}. EXAMPLE suggestions should name a concrete beat (hand, weight, timing, consequence) — not "make it more active."
+Flag every distinct kinetic opening in this text. EXAMPLE suggestions should name a concrete beat (hand, weight, timing, consequence) — not "make it more active."
 Ignore filter words, plot holes, and book-wide continuity. Do not rewrite the manuscript.`;
   }
 
@@ -1065,9 +1173,9 @@ STORY & STRUCTURE — look only for:
 
 For character-voice flags: DIRECTION may be a Socratic question ("Does this sound like her under pressure?"). EXAMPLE may be a tiny sample line or beat in their register AND in the chapter’s narrative person, clearly marked as illustrative ("e.g. something like…") — never a paste-ready monologue rewrite.
 
-Pick every clear story/structure issue (soft cap ~${MAX_FLAGS_PER_PASS}). Use only the category ids above.
+Pick every clear story/structure issue. Use only the category ids above. Do not stop because the list is getting long.
 
-Ignore copy-edit minutiae (filter words, -ly counts, rhythm) on this pass.`;
+Ignore copy-edit minutiae (filter words, tense, POV hops, -ly counts, rhythm) on this pass. Character-voice here is how they sound, not whose skull we’re in (Style & Line flags hops).`;
   }
 
   return `${shared}
@@ -1079,7 +1187,7 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
   const categories = categoriesForPass(kind);
   return {
     name: REVIEW_TOOL_NAME,
-    description: `Save editorial flags for this ${chapterPassLabel(kind)} pass (up to ${MAX_FLAGS_PER_PASS}). Put flags first; summary last and brief. Suggestions stay in this review only — never applied to the manuscript.`,
+    description: `Save editorial flags for this ${chapterPassLabel(kind)} pass. Put flags first; summary last and brief. Flag every distinct issue — do not cap the list. Suggestions stay in this review only — never applied to the manuscript.`,
     input_schema: {
       type: "object" as const,
       // Property order matters: models fill keys in order. Flags before summary
@@ -1087,7 +1195,7 @@ export function reviewToolForKind(kind: DevelopmentalPassKind) {
       properties: {
         flags: {
           type: "array",
-          description: `Discrete issues with verbatim excerpts (soft max ${MAX_FLAGS_PER_PASS}). Fill this FIRST. Required whenever you notice issues — never put flaggable moments only in summary. Empty array only if nothing fits this pass.`,
+          description: `Discrete issues with verbatim excerpts. Fill this FIRST. Required whenever you notice issues — never put flaggable moments only in summary. Empty array only if nothing fits this pass. Include every distinct moment; collapse only identical repeats of the same excerpt.`,
           items: {
             type: "object",
             properties: {

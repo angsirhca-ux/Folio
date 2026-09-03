@@ -1,4 +1,5 @@
 import type { Editor } from "@tiptap/react";
+import { TextSelection } from "@tiptap/pm/state";
 
 export type ThesaurusHit = {
   word: string;
@@ -92,26 +93,129 @@ export function replaceEditorRange(
   from: number,
   to: number,
   text: string,
-) {
-  if (!editor || editor.isDestroyed) return;
+): boolean {
+  if (!editor || editor.isDestroyed) return false;
   const docSize = editor.state.doc.content.size;
   const start = Math.max(0, Math.min(from, docSize));
   const end = Math.max(start, Math.min(to, docSize));
-  if (!text && start === end) return;
+  if (start === end && !text) return false;
 
-  // insertText replaces [from, to) — more reliable than insertContentAt for
-  // plain dictionary / thesaurus swaps (no HTML parse, keeps surrounding marks).
-  editor
-    .chain()
-    .focus()
-    .command(({ tr, dispatch }) => {
-      if (dispatch) {
-        tr.insertText(text, start, end);
-        dispatch(tr);
+  try {
+    // Plain insertText only — TipTap’s insertContentAt parses strings as HTML
+    // and wraps them in a paragraph, which cannot land mid-sentence.
+    editor.view.focus();
+    let tr = editor.state.tr.insertText(text, start, end);
+    const caret = Math.min(start + text.length, tr.doc.content.size);
+    try {
+      tr = tr.setSelection(TextSelection.create(tr.doc, caret));
+    } catch {
+      try {
+        tr = tr.setSelection(TextSelection.near(tr.doc.resolve(caret)));
+      } catch {
+        /* replace still counts even if caret can’t land */
       }
-      return true;
-    })
-    .run();
+    }
+    editor.view.dispatch(tr);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isWordBoundary(ch: string | undefined): boolean {
+  return !ch || !/[\p{L}\p{N}'’]/u.test(ch);
+}
+
+/**
+ * Find a misspelling anywhere in the doc, preferring the occurrence closest to
+ * `nearPos` (from the right-click or caret).
+ */
+export function findMisspellingInDoc(
+  editor: Editor,
+  needle: string,
+  nearPos: number,
+): { word: string; from: number; to: number } | null {
+  const target = normalizeLookupWord(needle);
+  if (!target) return null;
+  const want = target.toLowerCase();
+  type Match = { word: string; from: number; to: number; dist: number };
+  const hits: Match[] = [];
+
+  editor.state.doc.descendants((node, pos) => {
+    if (!node.isTextblock) return;
+    const text = node.textContent;
+    const lower = text.toLowerCase();
+    let idx = 0;
+    while (idx <= lower.length) {
+      const found = lower.indexOf(want, idx);
+      if (found < 0) break;
+      const before = found > 0 ? text[found - 1] : undefined;
+      const after =
+        found + want.length < text.length
+          ? text[found + want.length]
+          : undefined;
+      if (!isWordBoundary(before) || !isWordBoundary(after)) {
+        idx = found + 1;
+        continue;
+      }
+      const from = pos + 1 + found;
+      const to = from + target.length;
+      hits.push({
+        word: text.slice(found, found + target.length),
+        from,
+        to,
+        dist: Math.abs(from - nearPos),
+      });
+      idx = found + target.length;
+    }
+  });
+
+  if (hits.length === 0) return null;
+  hits.sort((a, b) => a.dist - b.dist);
+  const best = hits[0];
+  return { word: best.word, from: best.from, to: best.to };
+}
+
+/**
+ * Find `needle` in the textblock under viewport coords (case-insensitive).
+ * Used when spellcheck names a misspelling but the caret isn't on it.
+ */
+export function findWordNearCoords(
+  editor: Editor,
+  needle: string,
+  clientX: number,
+  clientY: number,
+): { word: string; from: number; to: number } | null {
+  const target = normalizeLookupWord(needle);
+  if (!target) return null;
+  const hit = editor.view.posAtCoords({ left: clientX, top: clientY });
+  const pos = hit?.pos ?? editor.state.selection.from;
+  const $pos = editor.state.doc.resolve(pos);
+  const parent = $pos.parent;
+  if (!parent.isTextblock) return null;
+  const parentStart = $pos.start();
+  const text = parent.textContent;
+  const lower = text.toLowerCase();
+  const want = target.toLowerCase();
+  let idx = lower.indexOf(want);
+  if (idx < 0) return null;
+  // Prefer the occurrence closest to the click offset.
+  const offset = $pos.parentOffset;
+  let best = idx;
+  let bestDist = Math.abs(idx - offset);
+  while (idx >= 0) {
+    const dist = Math.abs(idx - offset);
+    if (dist < bestDist) {
+      best = idx;
+      bestDist = dist;
+    }
+    idx = lower.indexOf(want, idx + want.length);
+  }
+  return {
+    word: text.slice(best, best + target.length),
+    from: parentStart + best,
+    to: parentStart + best + target.length,
+  };
 }
 
 /**
@@ -123,7 +227,10 @@ export function matchReplacementCase(source: string, replacement: string): strin
   if (source === source.toUpperCase() && source.length > 1) {
     return replacement.toUpperCase();
   }
-  if (source[0] === source[0].toUpperCase() && source.slice(1) === source.slice(1).toLowerCase()) {
+  if (
+    source[0] === source[0].toUpperCase() &&
+    source.slice(1) === source.slice(1).toLowerCase()
+  ) {
     return replacement.charAt(0).toUpperCase() + replacement.slice(1);
   }
   return replacement;
